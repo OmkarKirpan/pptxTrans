@@ -1,0 +1,36 @@
+# .cursorrules - Learning Journal for PowerPoint Translator App
+
+## Project Intelligence
+- **Project Name:** PowerPoint Translator App Frontend MVP
+- **Core Objective:** Develop a web application to efficiently translate PowerPoint (PPTX) presentations while preserving formatting and enabling collaboration.
+- **Key Architectural Pattern:**
+    - Client-side: Next.js 14 (App Router) with React/TypeScript.
+    - BaaS: Supabase for Auth, Database (PostgreSQL), and Storage.
+    - Slide Rendering: High-fidelity approach using server-side conversion of PPTX slides to SVG images. SVGs are displayed as backgrounds in the client, with interactive HTML overlays for text elements positioned based on extracted coordinates.
+- **Technology Stack Preference:**
+    - Next.js (App Router preferred over Pages Router).
+    - TypeScript for type safety.
+    - Tailwind CSS for styling.
+    - shadcn/ui for accessible and customizable UI components.
+    - Supabase for backend services.
+- **User Experience (UX) Priorities:**
+    - **Intuitive Workflow:** The user journey from upload to translation to export should be clear and straightforward.
+    - **Visual Fidelity:** The editor should represent the original slide as accurately as possible.
+    - **Efficiency:** Minimize clicks and streamline tasks.
+    - **Professionalism:** Clean, modern, and reliable interface.
+- **Critical Implementation Path:** The server-side PPTX to SVG conversion and data extraction pipeline is the most critical and complex part of the system. The frontend design heavily relies on the output of this process.
+- **Development Challenge:** Implementing or integrating the aforementioned PPTX processing backend, as it requires tools/binaries not readily available in standard serverless/Next.js Lite environments. This will likely involve a separate microservice or a specialized cloud function with a custom runtime.
+- **v0 Interaction Notes:**
+    - When generating components, default to Next.js App Router conventions.
+    - Utilize shadcn/ui components where appropriate, importing them from `@/components/ui`. Do not regenerate shadcn component code.
+    - Prefer Server Components for data fetching and rendering static content; use Client Components (`'use client'`) for interactivity and state management.
+    - For Supabase interactions, use the provided client and server helper functions (`lib/supabase/client.ts`, `lib/supabase/server.ts`).
+- **Code Style Preferences:**
+    - Use kebab-case for file names (e.g., `login-form.tsx`).
+    - Employ descriptive variable and function names.
+    - Follow ESLint/Prettier configurations if provided (assume standard Next.js setup).
+- **Evolution of Decisions:**
+    - Initial thought might have been simpler client-side rendering, but shifted to server-side SVG conversion for higher visual fidelity as per user request. This significantly impacts the `SlideCanvas` design and data requirements.
+- **Tool Usage Patterns:**
+    - Supabase dashboard for managing users, database schema, and storage.
+    - v0 AI for code generation and iteration.
