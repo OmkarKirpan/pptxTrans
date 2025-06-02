@@ -64,6 +64,9 @@ class Settings(BaseSettings):
     GENERATE_THUMBNAILS: bool = True
     THUMBNAIL_WIDTH: int = 250
 
+    TEMP_DIR: str = "/tmp/pptx_processor"  # Example default
+    LIBREOFFICE_PATH: Optional[str] = None
+
 
 @lru_cache()
 def get_settings() -> Settings:

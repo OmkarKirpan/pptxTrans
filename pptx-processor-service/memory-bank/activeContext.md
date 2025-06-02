@@ -1,85 +1,65 @@
 # Active Context
 
 ## Current Focus
-- Testing the app with real PPTX files
-- Further optimizing the SVG generation
-- Improving text positioning and styling extraction
+- Refining and testing the hybrid PPTX to SVG conversion process.
+- Ensuring robustness and optimal performance of LibreOffice integration.
 
 ## Recent Changes
-- Removed CairoSVG dependency to avoid Windows compatibility issues
-- Implemented direct SVG generation using ElementTree
-- Removed Celery/Redis dependencies for simplified architecture
-- Updated configuration to use relative paths for Windows compatibility
-- Implemented actual PPTX to SVG conversion
-- Fixed text extraction with positioning
-- Created proper thumbnail generation
-- Updated README with clear instructions
+- **Refactored `pptx_processor.py` for optimization and clarity:**
+    - Made `LIBREOFFICE_PATH` configurable via `app.core.config.settings`.
+    - Implemented `_generate_svgs_for_all_slides_libreoffice` for efficient batch SVG conversion using a single `soffice` call per presentation.
+    - `process_pptx` now orchestrates this batch conversion upfront.
+    - `process_slide` now uses pre-generated SVGs if available, otherwise falls back to ElementTree generation.
+    - Streamlined `extract_shapes` to be called only once per slide; its output is reused for SVG fallback and the final `ProcessedSlide` model.
+    - Improved `create_svg_from_slide` to accept pre-extracted shapes data and slide background fill.
+    - Enhanced `create_thumbnail_from_slide_pil` to use extracted shapes, actual slide background (solid fills), and render embedded images.
+    - Added `get_slide_background_fill` and `create_minimal_svg` helpers.
+    - Improved directory management for processing outputs and cleanup.
+    - Removed the old `convert_slide_to_svg_using_libreoffice` (single slide processing with LibreOffice).
+- Updated `app.core.config.py` and `env.example` for `LIBREOFFICE_PATH`.
 
-## Critical Issues Resolved
-
-### 1. Cairo Library Dependency (Windows)
-- **Issue**: CairoSVG required Cairo library to be installed separately on Windows
-- **Solution**: Replaced CairoSVG with direct SVG generation using ElementTree
-- **Status**: ✅ Resolved
-
-### 2. Mock Implementation
-- **Issue**: The pptx_processor.py had placeholder SVG generation instead of actual conversion
-- **Solution**: Implemented real conversion using python-pptx and ElementTree for SVG generation
-- **Status**: ✅ Resolved
-
-### 3. Overly Complex Architecture
-- **Issue**: Code included Redis/Celery for task queuing but user wants simple working app
-- **Solution**: Removed Redis/Celery dependencies and simplified to direct processing
-- **Status**: ✅ Resolved
-
-### 4. Windows Compatibility
-- **Issue**: Application couldn't run on Windows due to dependency issues
-- **Solution**: Used relative paths and Windows-compatible libraries
-- **Status**: ✅ Resolved
+## Critical Issues Being Addressed
+- Ensuring the batch LibreOffice conversion correctly maps generated SVGs to slide numbers.
+- Verifying performance gains from the batch conversion.
+- Maintaining reliability of the fallback ElementTree SVG generation.
 
 ## Next Steps
-1. Test with various PPTX files to ensure robust conversion
-2. Improve handling of complex slides (tables, charts, images)
-3. Enhance text styling extraction for better fidelity
-4. Optimize performance for large presentations
-5. Add detailed error handling for edge cases
+1.  Thoroughly test the refactored `pptx_processor.py` with diverse PPTX files (complex layouts, various elements, large sizes).
+2.  Benchmark performance before and after the optimization.
+3.  Review and refine error handling, especially for LibreOffice subprocess calls and SVG mapping.
+4.  Update detailed documentation for the new processing flow and configuration.
+5.  Consider adding more sophisticated slide background extraction if needed (e.g., gradients, images).
 
 ## Active Decisions
+- **SVG Visuals (Primary)**: Batch LibreOffice `soffice.exe` call (`_generate_svgs_for_all_slides_libreoffice`) converting all slides at once.
+- **SVG Visuals (Fallback)**: ElementTree-based generation (`create_svg_from_slide`) using pre-extracted shape data.
+- **Text/Metadata Extraction**: `python-pptx` (via `extract_shapes`), performed once per slide.
+- **`LIBREOFFICE_PATH`**: Configurable via `.env` and `app.core.config.settings`.
 
-### Package Management
-- **Decision**: Use UV instead of pip for package management ✓
-- **Status**: Successfully implemented
-
-### SVG Generation Approach
-- **Decision**: Use ElementTree for direct SVG generation
-- **Rationale**: Avoids Cairo dependency and works on all platforms
-- **Status**: Successfully implemented
-
-### Architecture Simplification
-- **Decision**: Remove Celery/Redis dependency for basic functionality
-- **Rationale**: User wants simple working app without complex infrastructure
-- **Implementation**: Using FastAPI's background tasks for async processing
-- **Status**: Successfully implemented
-
-### PPTX Processing Approach
-- **Decision**: Use python-pptx to extract content and create SVG manually
-- **Rationale**: Most direct approach with fewest dependencies
-- **Status**: Successfully implemented
-
-## Implementation Details
-- Text extraction preserves positioning and basic styling
-- SVG generation includes properly positioned text elements
-- Thumbnail generation shows text block positioning
-- Background tasks handle processing without blocking API responses
-- Relative paths ensure cross-platform compatibility
+## Implementation Details for Hybrid Approach
+- `process_pptx` function:
+    - Checks for configured and valid `settings.LIBREOFFICE_PATH`.
+    - Calls `_generate_svgs_for_all_slides_libreoffice` once to get a dictionary mapping slide numbers to SVG paths.
+    - Iterates through slides, calling `process_slide` for each.
+- `_generate_svgs_for_all_slides_libreoffice` function:
+    - Uses `soffice --headless --convert-to svg:"impress_svg_Export" ...`.
+    - Manages a temporary directory for LibreOffice output.
+    - Attempts to sort and rename/map generated SVGs to `slide_{n}.svg` in the main processing output directory.
+    - Returns a dictionary `Dict[int, str]` of slide numbers to SVG paths.
+- `process_slide` function:
+    - Receives the path to a pre-generated LibreOffice SVG (if available).
+    - Calls `extract_shapes` once.
+    - If pre-generated SVG is not valid/available, calls `create_svg_from_slide` (passing extracted shapes and background fill).
+    - Uploads the chosen SVG.
+    - Generates thumbnail using `create_thumbnail_from_slide_pil` (passing extracted shapes).
+- `extract_shapes` provides all necessary data for both `ProcessedSlide` model and SVG fallback rendering.
 
 ## User Requirements Clarified
-- App will take PPTX from frontend or get it from Supabase storage
-- Generate SVG per slide with metadata for text display in slidecanvas frontend component
-- Used for PPTX text translation
-- No security or tests needed - just working functionality
+- App will take PPTX from frontend or get it from Supabase storage.
+- Generate SVG per slide with metadata for text display in slidecanvas frontend component.
+- Used for PPTX text translation.
+- No security or tests needed - just working functionality (though robustness is being improved).
 
 ## Current Questions
-- Should we use LibreOffice headless for conversion or implement custom solution?
-- Is exact visual fidelity required or is text extraction with positioning sufficient?
-- What metadata format is expected by the slidecanvas frontend component? 
+- How consistently does `impress_svg_Export` name output files across different LibreOffice versions/OS when converting a whole presentation?
+- What is the best strategy if `_generate_svgs_for_all_slides_libreoffice` produces an unexpected number of SVG files (e.g., not matching `slide_count`)? 

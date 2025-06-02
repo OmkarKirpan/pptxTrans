@@ -3,150 +3,90 @@
 ## Technologies Used
 
 ### Core Framework
-- **FastAPI**: Modern, high-performance Python web framework
-  - Async support for handling concurrent requests
-  - Built-in validation via Pydantic
-  - OpenAPI documentation generation
+- **FastAPI**: Modern, high-performance Python web framework.
 
-### PPTX Processing
-- **python-pptx**: Library for reading and writing PowerPoint (.pptx) files
-- **CairoSVG**: SVG rendering and manipulation tool
-- **ReportLab**: PDF generation library
-- **Pillow**: Python Imaging Library for image processing
+### PPTX Processing & SVG Generation
+- **LibreOffice (via `subprocess`)**: Primary method for high-fidelity PPTX to SVG conversion. Uses a single batch call (`--convert-to svg:"impress_svg_Export"`) for all slides.
+- **`python-pptx`**: For parsing PPTX files, extracting slide content, shapes, text, styles, and metadata.
+- **`xml.etree.ElementTree`**: For fallback SVG generation if LibreOffice is unavailable or fails.
+- **Pillow (PIL)**: For image processing, including creating thumbnails and handling embedded images.
 
 ### Backend and Storage
-- **Supabase**: Backend-as-a-Service platform
-  - Storage for PPTX files, generated SVGs, and thumbnails
-  - Database for session management
-- **storage3**: Supabase Storage client for Python
-
-### Task Queue
-- **Celery**: Distributed task queue
-- **Redis**: Message broker for Celery
+- **Supabase**: For object storage (PPTX, SVGs, thumbnails) and potentially job status tracking (though currently local).
 
 ### Utilities
-- **python-multipart**: Multipart form data parsing
-- **python-dotenv**: Environment variable management
-- **tenacity**: Retry library for resilient operations
-- **aiofiles**: Asynchronous file operations
+- **`python-dotenv`**: For managing environment variables.
+- **`uv`**: For Python package management (replacing pip).
+- **`aiofiles`**: For asynchronous file operations (though current direct use is minimal).
 
-### Monitoring
-- **prometheus-client**: Metrics collection
-- **opentelemetry**: Distributed tracing
+## Current Technical Issues & Considerations
 
-### Testing
-- **pytest**: Testing framework
-- **httpx**: HTTP client for testing FastAPI applications
+### 1. LibreOffice SVG Output Mapping
+-   **Issue**: The `impress_svg_Export` filter's output file naming/numbering when converting a whole presentation needs to be robustly mapped to slide numbers. Current logic assumes sorted output matches slide order if file count is correct.
+-   **Mitigation**: Logging is in place. Further testing across LibreOffice versions/OS is needed. If mapping fails, the system falls back to per-slide ElementTree generation.
 
-### Package Management
-- **UV**: Fast Python package installer and resolver (replacing pip)
+### 2. Performance of Batch LibreOffice Conversion
+-   **Consideration**: While more efficient than per-slide calls, a single batch call for very large presentations might be long-running or memory-intensive. Timeouts are implemented.
+-   **Optimization**: Current approach is a significant improvement. Further parallelization of *independent* tasks (like thumbnail generation after SVGs are ready) could be explored if needed.
 
-## Current Technical Issues
+### 3. Fallback SVG Fidelity
+-   **Limitation**: The ElementTree-based SVG fallback (`create_svg_from_slide`) has inherent limitations in rendering complex PowerPoint features (e.g., intricate SmartArt, some chart types, complex gradients) with perfect visual fidelity compared to LibreOffice.
 
-### 1. Cairo Library on Windows
-- **Problem**: CairoSVG requires Cairo C library to be installed separately on Windows
-- **Error**: `OSError: no library called "cairo-2" was found`
-- **Solutions**:
-  - Install GTK+ for Windows (includes Cairo)
-  - Use alternative SVG generation method
-  - Switch to image-based output (PNG/JPG)
-
-### 2. Missing Core Implementation
-- **Problem**: PPTX to SVG conversion uses placeholder/mock implementation
-- **Impact**: No actual slide rendering happens
-- **Solutions**:
-  - Implement custom SVG generation using python-pptx
-  - Use LibreOffice headless mode
-  - Use cloud conversion service
-
-### 3. Unnecessary Complexity
-- **Problem**: Redis/Celery adds complexity without benefit for simple use case
-- **Impact**: Extra dependencies and setup required
-- **Solution**: Use FastAPI BackgroundTasks or direct processing
-
-## Development Setup (Current)
+## Development Setup
 
 ### Environment Requirements
-- Python 3.10+
-- Redis server (for Celery)
-- Cairo library (for CairoSVG)
-- Supabase account and project
+-   Python 3.10+
+-   LibreOffice (optional but highly recommended for best SVG quality).
+-   Supabase account and project (for storage).
 
 ### Working Local Development Steps
-1. Clone repository
-2. Create virtual environment
-3. Install dependencies with UV
-4. Configure environment variables
-5. Fix Cairo dependency issue
-6. Run development server with uvicorn
+1.  Clone repository.
+2.  Create a Python virtual environment.
+3.  Install dependencies: `uv pip install -r requirements.txt`.
+4.  Set up a `.env` file based on `env.example` (configure Supabase, `LIBREOFFICE_PATH`, etc.).
+5.  Ensure LibreOffice is installed and `LIBREOFFICE_PATH` in `.env` points to the `soffice` executable if using this feature.
+6.  Run development server: `uvicorn main:app --reload` (or as per `pyproject.toml`).
 
-### Environment Variables Status
-- `SUPABASE_URL`: Supabase project URL
-- `SUPABASE_KEY`: Supabase API key
-- `REDIS_URL`: Redis connection string
-- `TEMP_DIR`: Directory for temporary file processing
-- `LOG_LEVEL`: Logging level configuration
+### Key Environment Variables (`.env`)
+-   `SUPABASE_URL`, `SUPABASE_KEY`: For Supabase integration.
+-   `LIBREOFFICE_PATH`: Optional path to `soffice` executable.
+-   `LOG_LEVEL`: E.g., `INFO`, `DEBUG`.
+-   `TEMP_DIR`: Base directory for temporary processing files (though `TEMP_UPLOAD_DIR`, `TEMP_PROCESSING_DIR` from `app.core.config` are more specific now).
 
-## Technical Constraints
+## Technical Constraints & Decisions
 
-### Performance Considerations
-- Large PPTX files can consume significant memory during processing
-- SVG generation is CPU-intensive
-- Complex slides with many elements take longer to process
+### SVG Generation Strategy: Hybrid, Optimized
+-   **Primary**: Batch LibreOffice call for all slides for high visual fidelity and efficiency.
+-   **Fallback**: `python-pptx` + ElementTree for guaranteed SVG output (lower fidelity for complex elements) if LibreOffice fails or is not configured.
+-   **Rationale**: Balances visual quality, robustness, and performance.
 
-### Security Requirements
-- Secure handling of user-uploaded content
-- API key protection
-- Proper input validation and sanitization
+### Metadata Extraction
+-   Always performed using `python-pptx` (`extract_shapes`) once per slide, irrespective of the SVG generation method used for that slide's visual.
 
-### Scalability Considerations
-- Horizontal scaling for handling multiple concurrent requests
-- Memory usage optimization for large files
-- Resource throttling to prevent overload
+### Asynchronous Operations
+-   FastAPI's `BackgroundTasks` are used for the main `process_pptx` task, keeping the API responsive.
 
-### Current Limitations
-- No actual PPTX to SVG conversion implemented
-- Cairo dependency prevents running on Windows
-- Mock implementation returns placeholder data
-- Text extraction is oversimplified
+### Configuration
+-   Key operational parameters (LibreOffice path, Supabase details) are managed via `app.core.config.Settings` loading from `.env`.
 
-## Recommended Technical Stack (Simplified)
+## Implemented Technical Stack Summary
 
-### For PPTX to SVG Conversion
-**Option 1: Pure Python Solution**
-- Use python-pptx to extract slide elements
-- Generate SVG manually using xml.etree or svgwrite
-- Use Pillow for image elements
-- No Cairo dependency
+-   **API**: FastAPI
+-   **PPTX Parsing & Metadata**: `python-pptx`
+-   **Primary SVG Rendering**: LibreOffice (`soffice` via `subprocess`)
+-   **Fallback SVG Rendering**: `xml.etree.ElementTree`
+-   **Image Handling/Thumbnails**: Pillow
+-   **Package Management**: `uv`
+-   **Configuration**: `python-dotenv`, Pydantic `BaseSettings`
+-   **Storage**: Supabase (via `supabase-py` client library)
 
-**Option 2: LibreOffice Headless**
-- Install LibreOffice
-- Use subprocess to convert PPTX to SVG
-- Most accurate rendering
-- Cross-platform compatible
-
-**Option 3: Image-based Approach**
-- Convert slides to PNG/JPG instead of SVG
-- Use python-pptx + Pillow
-- Simpler but less scalable for frontend
-
-### Simplified Dependencies
-Remove from requirements.txt:
-- celery
-- redis
-- cairosvg (replace with alternative)
-
-Add/Keep:
-- python-pptx (for PPTX parsing)
-- pillow (for image processing)
-- svgwrite or xml.etree (for SVG generation)
-- fastapi, uvicorn (web framework)
-- supabase (storage)
-
-## Dependencies
-Key dependency versions are managed in requirements.txt, with the following major components:
-- fastapi >= 0.103.1
-- python-pptx >= 0.6.21
-- cairosvg >= 2.7.0
-- supabase >= 1.0.3
-- celery >= 5.3.4 
+## Dependencies (Key Libraries)
+-   `fastapi`
+-   `uvicorn`
+-   `python-pptx`
+-   `Pillow`
+-   `pydantic`
+-   `pydantic-settings`
+-   `python-dotenv`
+-   `supabase`
+-   Standard libraries: `os`, `shutil`, `subprocess`, `glob`, `json`, `xml.etree.ElementTree`, `logging`, `asyncio`, `tempfile`. 

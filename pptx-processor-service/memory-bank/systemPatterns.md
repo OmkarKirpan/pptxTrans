@@ -2,107 +2,104 @@
 
 ## Architecture Overview
 
-### Current Implementation
-The PPTX Processor Service currently follows a microservice architecture but with implementation gaps:
+The PPTX Processor Service follows a clean architecture pattern with clear separation of concerns:
 
-```
-┌─────────────────┐     ┌───────────────┐     ┌────────────────┐
-│  API Layer      │────▶│ Service Layer │────▶│ Storage Layer  │
-│  (FastAPI) ✓    │     │ (Partial) ⚠️   │     │ (Supabase) ✓   │
-└─────────────────┘     └───────────────┘     └────────────────┘
-        ▲                       │                     
-        │                       ▼                     
-        │              ┌───────────────┐              
-        └──────────────│  Task Queue   │ (Not needed)
-                       │  (Celery) ❌   │
-                       └───────────────┘
-```
-
-### Simplified Architecture (Recommended)
-Based on user requirements for a simple working app:
-
-```
-┌─────────────────┐     ┌────────────────┐     ┌────────────────┐
-│  API Layer      │────▶│ PPTX Processor │────▶│ Storage Layer  │
-│  (FastAPI)      │     │ (Direct)       │     │ (Supabase)     │
-└─────────────────┘     └────────────────┘     └────────────────┘
+```mermaid
+graph TD
+    A[Client] --> B(API Layer - FastAPI)
+    B --> C{Service Layer - pptx_processor.py}
+    C --> D[Data Models - Pydantic]
+    C --> E{Configuration - core/config.py}
+    C --> F(LibreOffice via Subprocess)
+    C --> G(python-pptx)
+    C --> H(Pillow)
+    C --> I(xml.etree.ElementTree)
+    C --> J(Supabase Client - Storage)
 ```
 
-## Current Implementation Status
+### Core Components
+1.  **API Layer (`main.py`, `app/api/routes/`)**: Handles HTTP requests, enqueues processing tasks using FastAPI `BackgroundTasks`.
+2.  **Service Layer (`app/services/pptx_processor.py`)**: Orchestrates the entire PPTX processing logic.
+    *   Uses `app.core.config.settings` for configuration (e.g., `LIBREOFFICE_PATH`).
+    *   Calls `_generate_svgs_for_all_slides_libreoffice` for batch SVG conversion.
+    *   Calls `process_slide` for each slide.
+3.  **SVG Generation Sub-System**:
+    *   **Primary (`_generate_svgs_for_all_slides_libreoffice`)**: Uses LibreOffice (`soffice`) via `subprocess` to convert the entire PPTX to SVGs in one batch operation.
+    *   **Fallback (`create_svg_from_slide`)**: Uses `python-pptx` (via `extract_shapes`) and `xml.etree.ElementTree` to generate SVGs if LibreOffice fails or is not configured.
+4.  **Metadata Extraction (`extract_shapes`)**: Uses `python-pptx` to extract detailed information about shapes, text, styles, and images from each slide.
+5.  **Thumbnail Generation (`create_thumbnail_from_slide_pil`)**: Uses Pillow, `python-pptx` (slide object), and extracted shape data to create PNG thumbnails.
+6.  **Data Models (`app/models/schemas.py`)**: Pydantic models for request/response validation and structured data representation.
+7.  **Storage (`app/services/supabase_service.py`)**: Handles uploading generated assets (SVGs, thumbnails, JSON results) to Supabase.
 
-### ✓ Implemented Patterns
-1. **FastAPI Structure**: Proper separation of routes, services, models
-2. **Dependency Injection**: Using FastAPI's dependency system
-3. **Data Models**: Well-defined Pydantic schemas
-4. **Service Layer**: Basic structure exists
+### Processing Pipeline (Optimized)
 
-### ⚠️ Partially Implemented
-1. **Repository Pattern**: Supabase integration exists but not fully utilized
-2. **Error Handling**: Basic structure exists but needs improvement
+```mermaid
+sequenceDiagram
+    participant Client
+    participant API (FastAPI)
+    participant Processor (process_pptx)
+    participant BatchLO (LibreOffice Batch SVG)
+    participant SlideProc (process_slide)
+    participant PythonPPTX (extract_shapes)
+    participant ElementTree (fallback SVG)
+    participant Storage (Supabase)
 
-### ❌ Not Implemented / Issues
-1. **Actual PPTX Processing**: Only mock/placeholder implementation
-2. **Task Queue**: Overly complex for requirements (Celery/Redis)
-3. **SVG Generation**: Placeholder only, no real conversion
+    Client->>API: Upload PPTX file
+    API->>Processor: Queue processing_pptx task (async)
+    Processor->>PythonPPTX: Load Presentation
+    Processor->>BatchLO: _generate_svgs_for_all_slides_libreoffice(pptx_path, out_dir, slide_count)
+    alt LibreOffice Success and SVGs Mapped
+        BatchLO-->>Processor: Dict[slide_num, svg_path]
+    else LibreOffice Fail or Mapping Issue
+        BatchLO-->>Processor: Empty Dict / Log warning
+    end
 
-## Core Design Patterns (Revised)
+    loop For Each Slide
+        Processor->>SlideProc: process_slide(slide, slide_num, pregen_svg_path_if_any)
+        SlideProc->>PythonPPTX: extract_shapes(slide)
+        alt Pre-generated LO SVG Available and Valid
+            SlideProc-->>SlideProc: Use LO SVG
+        else Fallback Needed
+            SlideProc->>ElementTree: create_svg_from_slide(extracted_shapes_data)
+            ElementTree-->>SlideProc: Fallback SVG path
+        end
+        SlideProc->>Storage: Upload chosen SVG & Thumbnail
+        SlideProc-->>Processor: ProcessedSlideData
+    end
 
-### Direct Processing Pattern (Recommended)
-- Remove Celery/Redis dependency
-- Use FastAPI's BackgroundTasks for async operations
-- Direct processing for immediate response
+    Processor->>Storage: Upload final JSON result
+    Processor->>API: Update final job status (e.g., via local job status manager)
+    API-->>Client: Job ID and initial status (final result via polling status endpoint)
+```
 
-### Service Layer Pattern
-- Simplify to focus on core functionality:
-  - `PPTXService`: Handle PPTX parsing and conversion
-  - `StorageService`: Handle Supabase uploads
-  - `TextExtractionService`: Extract text with positioning
+## Key Design Patterns
 
-### Data Flow (Simplified)
+### Hybrid Conversion (Optimized)
+-   **Primary Visuals**: Batch LibreOffice call for high-fidelity SVGs of all slides at once.
+    -   `_generate_svgs_for_all_slides_libreoffice(presentation_path, output_dir, slide_count)`
+-   **Fallback Visuals**: Per-slide ElementTree generation if LibreOffice fails/unavailable.
+    -   `create_svg_from_slide(slide_shapes_data, file_path, ...)`
+-   **Consistent Metadata**: `extract_shapes(slide, ...)` always uses `python-pptx`, ensuring uniform metadata regardless of the visual SVG source.
 
-1. **Input Processing**:
-   - Receive PPTX file via API or Supabase reference
-   - Validate file format
+### Configuration-Driven Behavior
+-   The availability and path of LibreOffice (`settings.LIBREOFFICE_PATH`) determine if the primary SVG generation path is attempted.
 
-2. **Slide Processing**:
-   - Parse PPTX using python-pptx
-   - Extract slide content and structure
-   - Generate SVG representation
-   - Extract text with positioning data
+### Centralized Settings Management
+-   `app.core.config.Settings` (Pydantic `BaseSettings`) loads configuration from `.env`, providing typed access throughout the application.
 
-3. **Output Generation**:
-   - Create SVG files for each slide
-   - Generate metadata for frontend
-   - Upload to Supabase if needed
-   - Return structured response
+### Asynchronous Task Execution
+-   FastAPI's `BackgroundTasks` for non-blocking PPTX processing.
 
-## Implementation Gaps
+### Robust Fallbacks
+-   If batch LibreOffice fails, system gracefully attempts per-slide ElementTree SVG.
+-   If all SVG generation for a slide fails, a minimal placeholder SVG is created (`create_minimal_svg`).
 
-### Critical Missing Components
-1. **PPTX to SVG Conversion**: No actual implementation
-   - Current: Placeholder SVG generation
-   - Needed: Real conversion logic
+## Error Handling Strategy
+-   **Subprocess Management**: Timeouts and error capturing for LibreOffice calls.
+-   **File I/O**: Standard `try-except` blocks for file operations.
+-   **SVG Mapping Logic**: Specific checks for LibreOffice output file count against slide count to ensure correct association.
+-   **Logging**: Detailed logging at each significant step, especially around primary/fallback decisions and errors.
 
-2. **Text Positioning**: Simplified implementation
-   - Current: Basic coordinate extraction
-   - Needed: Accurate positioning for all elements
-
-3. **Windows Compatibility**: Cairo dependency issue
-   - Current: Requires manual Cairo installation
-   - Needed: Cross-platform solution
-
-## Recommended Architecture Changes
-
-1. **Remove Complexity**:
-   - Eliminate Celery/Redis requirement
-   - Use simple async processing
-
-2. **Focus on Core**:
-   - Implement actual PPTX conversion
-   - Ensure Windows compatibility
-   - Match frontend requirements
-
-3. **Simplify Dependencies**:
-   - Replace CairoSVG with alternative
-   - Use python-pptx for extraction
-   - Consider Pillow for image generation 
+## Future Extensibility
+-   The separation of concerns allows for easier addition of alternative SVG converters or metadata extractors.
+-   The batch processing pattern for LibreOffice could be adapted if other tools offer similar efficient whole-presentation processing. 
