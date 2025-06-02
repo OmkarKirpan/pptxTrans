@@ -16,6 +16,7 @@ A simple microservice for converting PowerPoint presentations to SVGs and extrac
 
 - Python 3.8 or higher
 - UV (package management tool)
+- Supabase (local or cloud instance)
 
 ### Installation
 
@@ -40,13 +41,31 @@ TEMP_UPLOAD_DIR=./tmp/uploads
 TEMP_PROCESSING_DIR=./tmp/processing
 
 # Supabase (update these with your actual values)
-SUPABASE_URL=https://your-project-ref.supabase.co
-SUPABASE_KEY=your-supabase-service-key
+SUPABASE_URL=http://127.0.0.1:54321
+SUPABASE_KEY=your-supabase-anon-key
 SUPABASE_STORAGE_BUCKET=slide-visuals
 
 # Security
 ALLOWED_ORIGINS=http://localhost:3000
 ```
+
+### Supabase Setup
+
+#### 1. Database Setup
+
+Run the SQL script to create required tables:
+
+```bash
+# Using Supabase Studio (recommended):
+# 1. Go to http://127.0.0.1:54323
+# 2. Navigate to SQL Editor
+# 3. Copy and paste contents of supabase_setup.sql
+# 4. Click Run
+```
+
+#### 2. Storage Setup
+
+Follow the instructions in `STORAGE_SETUP.md` to create the required storage buckets through the Supabase Studio UI.
 
 ### Running the Service
 

@@ -105,6 +105,8 @@ async def _generate_svgs_for_all_slides_libreoffice(
             timeout=300  # 5 minutes timeout
         )
         logger.info(f"LibreOffice full conversion output: {process.stdout}")
+        if process.stderr:
+            logger.warning(f"LibreOffice conversion stderr: {process.stderr}")
 
         # LibreOffice typically names the main file based on the presentation name,
         # and subsequent files if it splits them (though for SVG it's often one file per slide with predictable names if the filter is right)
@@ -230,12 +232,12 @@ async def process_pptx(
         # Check LibreOffice availability
         if settings.LIBREOFFICE_PATH and os.path.exists(settings.LIBREOFFICE_PATH):
             try:
-                # Removed --headless as it might not be needed for version
-                test_command = [settings.LIBREOFFICE_PATH, "--version"]
+                # Use --help as it's more reliable than --version for some LO installations
+                test_command = [settings.LIBREOFFICE_PATH, "--help"]
                 test_result = subprocess.run(
                     test_command, check=True, capture_output=True, text=True, timeout=30)
                 logger.info(
-                    f"LibreOffice version: {test_result.stdout.strip()}")
+                    f"LibreOffice is available at: {settings.LIBREOFFICE_PATH}")
             except Exception as e:
                 logger.warning(
                     f"LibreOffice path is set but test failed: {str(e)}. Will use fallback SVG generation if optimized path fails.")
@@ -624,9 +626,9 @@ def extract_shapes(slide, slide_width_emu: int, slide_height_emu: int) -> List[S
             # Vertical Anchor for the text frame
             if text_frame.vertical_anchor:
                 anchor_map = {
-                    MSO_VERTICAL_ANCHOR.TOP: "TOP", MSO_VERTICAL_ANCHOR.MIDDLE: "MIDDLE",
-                    MSO_VERTICAL_ANCHOR.BOTTOM: "BOTTOM", MSO_VERTICAL_ANCHOR.TOP_CENTERED: "TOP_CENTERED",
-                    MSO_VERTICAL_ANCHOR.MIDDLE_CENTERED: "MIDDLE_CENTERED", MSO_VERTICAL_ANCHOR.BOTTOM_CENTERED: "BOTTOM_CENTERED"
+                    MSO_VERTICAL_ANCHOR.TOP: "TOP",
+                    MSO_VERTICAL_ANCHOR.MIDDLE: "MIDDLE",
+                    MSO_VERTICAL_ANCHOR.BOTTOM: "BOTTOM"
                 }
                 vertical_anchor_str = anchor_map.get(
                     text_frame.vertical_anchor, "TOP")

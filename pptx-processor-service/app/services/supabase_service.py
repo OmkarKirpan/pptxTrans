@@ -124,17 +124,36 @@ async def upload_file_to_supabase(
     try:
         supabase = _create_supabase_client()
 
-        # Check if the bucket exists, create it if not
+        # Check if the bucket exists
         buckets = supabase.storage.list_buckets()
         bucket_exists = any(b["name"] == bucket for b in buckets)
 
         if not bucket_exists:
-            supabase.storage.create_bucket(bucket)
+            try:
+                # Try to create the bucket
+                supabase.storage.create_bucket(bucket)
+                logger.info(f"Created storage bucket: {bucket}")
+            except Exception as bucket_error:
+                # If bucket creation fails (likely due to RLS), log but continue
+                # The bucket might already exist or need to be created manually
+                logger.warning(
+                    f"Could not create bucket '{bucket}': {str(bucket_error)}")
+                logger.warning(
+                    "Please ensure the bucket exists in Supabase Storage and has proper RLS policies")
 
-        # Upload the file
+        # Try to upload the file regardless
         with open(file_path, "rb") as f:
             file_bytes = f.read()
-            supabase.storage.from_(bucket).upload(destination_path, file_bytes)
+
+            # First, try to remove any existing file at this path (in case of retry)
+            try:
+                supabase.storage.from_(bucket).remove([destination_path])
+            except:
+                pass  # Ignore if file doesn't exist
+
+            # Upload the file
+            response = supabase.storage.from_(
+                bucket).upload(destination_path, file_bytes)
 
         # Get the public URL
         file_url = supabase.storage.from_(

@@ -50,3 +50,13 @@ CREATE TABLE IF NOT EXISTS slide_shapes (
   image_base64 TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Disable RLS on tables for development (enable and add policies for production)
+ALTER TABLE health_check DISABLE ROW LEVEL SECURITY;
+ALTER TABLE translation_sessions DISABLE ROW LEVEL SECURITY;
+ALTER TABLE slides DISABLE ROW LEVEL SECURITY;
+ALTER TABLE slide_shapes DISABLE ROW LEVEL SECURITY;
+
+-- Note: For production, replace DISABLE with ENABLE and add proper policies:
+-- ALTER TABLE health_check ENABLE ROW LEVEL SECURITY;
+-- CREATE POLICY "Allow all operations" ON health_check FOR ALL USING (true) WITH CHECK (true);

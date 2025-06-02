@@ -1,0 +1,1 @@
+{"job_id":"14522686-e370-45ff-bfba-5cf0b5b195e1","session_id":"221022","status":"failed","progress":0,"current_stage":"Processing failed","message":null,"completed_at":null,"error":"type object 'MSO_VERTICAL_ANCHOR' has no attribute 'TOP_CENTERED'"}

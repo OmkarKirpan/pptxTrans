@@ -1,34 +1,57 @@
 # Active Context
 
 ## Current Focus
-- Refining and testing the hybrid PPTX to SVG conversion process.
-- Ensuring robustness and optimal performance of LibreOffice integration.
+Successfully integrated Supabase for storage and got basic PPTX processing working. The service can now:
+- Accept PPTX file uploads
+- Process slides using fallback SVG generation (ElementTree)
+- Upload SVGs and thumbnails to Supabase storage
+- Track job status and allow retrying failed jobs
 
 ## Recent Changes
-- **Refactored `pptx_processor.py` for optimization and clarity:**
-    - Made `LIBREOFFICE_PATH` configurable via `app.core.config.settings`.
-    - Implemented `_generate_svgs_for_all_slides_libreoffice` for efficient batch SVG conversion using a single `soffice` call per presentation.
-    - `process_pptx` now orchestrates this batch conversion upfront.
-    - `process_slide` now uses pre-generated SVGs if available, otherwise falls back to ElementTree generation.
-    - Streamlined `extract_shapes` to be called only once per slide; its output is reused for SVG fallback and the final `ProcessedSlide` model.
-    - Improved `create_svg_from_slide` to accept pre-extracted shapes data and slide background fill.
-    - Enhanced `create_thumbnail_from_slide_pil` to use extracted shapes, actual slide background (solid fills), and render embedded images.
-    - Added `get_slide_background_fill` and `create_minimal_svg` helpers.
-    - Improved directory management for processing outputs and cleanup.
-    - Removed the old `convert_slide_to_svg_using_libreoffice` (single slide processing with LibreOffice).
-- Updated `app.core.config.py` and `env.example` for `LIBREOFFICE_PATH`.
+1. **Fixed Critical Bugs**:
+   - Slide dimensions now correctly accessed from presentation object
+   - MSO_VERTICAL_ANCHOR enum mapping fixed by removing non-existent values
+   - Supabase URL validation improved with normalization
 
-## Critical Issues Being Addressed
-- Ensuring the batch LibreOffice conversion correctly maps generated SVGs to slide numbers.
-- Verifying performance gains from the batch conversion.
-- Maintaining reliability of the fallback ElementTree SVG generation.
+2. **Supabase Integration**:
+   - Successfully connected to local Supabase instance
+   - Created all required database tables
+   - Configured storage buckets (slide-visuals, processing-results)
+   - Disabled RLS for development to avoid permission issues
+
+3. **Error Handling**:
+   - Added graceful handling of storage bucket creation errors
+   - Implemented retry mechanism for failed jobs
+   - Better logging throughout the process
+
+## Current Issues
+1. **LibreOffice**: Conversion command executes but produces no SVG output
+   - Might be Windows path or command argument issue
+   - Fallback to ElementTree is working fine
+
+2. **Performance**: Need to optimize for larger presentations
 
 ## Next Steps
-1.  Thoroughly test the refactored `pptx_processor.py` with diverse PPTX files (complex layouts, various elements, large sizes).
-2.  Benchmark performance before and after the optimization.
-3.  Review and refine error handling, especially for LibreOffice subprocess calls and SVG mapping.
-4.  Update detailed documentation for the new processing flow and configuration.
-5.  Consider adding more sophisticated slide background extraction if needed (e.g., gradients, images).
+1. Debug LibreOffice SVG generation on Windows
+2. Test with various PPTX files to ensure robustness
+3. Add production-ready RLS policies
+4. Improve error recovery mechanisms
+5. Performance optimization for large files
+
+## Technical State
+- API running on http://localhost:8000
+- Supabase running on http://127.0.0.1:54321
+- Storage buckets configured and working
+- Database schema implemented
+- Background task processing active
+- Retry mechanism implemented
+
+## User Workflow
+1. Upload PPTX file to `/api/process`
+2. Receive job ID and session ID
+3. Check status at `/status/status/{job_id}`
+4. If failed, can retry with `/status/retry/{job_id}`
+5. Get results at `/status/results/{session_id}` when completed
 
 ## Active Decisions
 - **SVG Visuals (Primary)**: Batch LibreOffice `soffice.exe` call (`_generate_svgs_for_all_slides_libreoffice`) converting all slides at once.
