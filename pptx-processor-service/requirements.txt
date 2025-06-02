@@ -4,11 +4,11 @@ uvicorn>=0.23.2
 python-multipart>=0.0.6
 pydantic>=2.4.2
 pydantic-settings>=2.0.3
+psutil>=5.9.0
+requests>=2.32.3
 
 # PPTX processing
 python-pptx>=0.6.21
-cairosvg>=2.7.0
-reportlab>=4.0.4
 pillow>=10.0.0
 
 # Supabase integration
@@ -19,10 +19,6 @@ storage3>=0.5.4
 python-dotenv>=1.0.0
 tenacity>=8.2.3
 aiofiles>=23.2.1
-
-# Task queue
-celery>=5.3.4
-redis>=5.0.0
 
 # Logging and monitoring
 prometheus-client>=0.17.1

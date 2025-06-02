@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import os
 from dotenv import load_dotenv
@@ -10,8 +10,9 @@ from app.core.config import Settings, get_settings
 load_dotenv()
 
 
-def create_application(settings: Settings = Depends(get_settings)) -> FastAPI:
+def create_application() -> FastAPI:
     """Create and configure the FastAPI application."""
+    settings = get_settings()
     application = FastAPI(
         title=settings.PROJECT_NAME,
         description=settings.PROJECT_DESCRIPTION,

@@ -7,9 +7,13 @@ from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 from pptx import Presentation
 from PIL import Image
-import cairosvg
 import json
 import shutil
+import xml.etree.ElementTree as ET
+from pptx.enum.text import PP_ALIGN, MSO_VERTICAL_ANCHOR
+from pptx.util import Emu, Pt
+import base64
+from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 from app.models.schemas import (
     ProcessedSlide,
@@ -41,8 +45,7 @@ async def queue_pptx_processing(
     """
     Queue the PPTX processing task.
 
-    In a production environment, this would dispatch to a task queue like Celery.
-    For this implementation, we'll just run the processing directly in a separate thread.
+    For this simplified implementation, we'll just run the processing directly as a background task.
     """
     # Update job status to processing
     await update_local_job_status(
@@ -245,13 +248,12 @@ async def process_slide(
     slide_width = int(slide.slide_width)
     slide_height = int(slide.slide_height)
 
-    # Convert slide to SVG (this is a simplified example - real implementation would be more complex)
-    # In a real implementation, this would use a proper library or external tool like LibreOffice
+    # Convert slide to SVG
     svg_file = os.path.join(slide_dir, f"slide_{slide_number}.svg")
 
-    # MOCK IMPLEMENTATION - In a real service, this would use actual conversion
-    # For now, we're creating a placeholder SVG
-    create_placeholder_svg(svg_file, slide_width, slide_height, slide_number)
+    # Generate actual SVG using direct XML generation
+    create_svg_from_slide(slide, svg_file, slide_width,
+                          slide_height, slide_number)
 
     # Upload SVG to Supabase
     svg_url = await upload_file_to_supabase(
@@ -268,9 +270,9 @@ async def process_slide(
         thumbnail_file = os.path.join(
             slide_dir, f"thumbnail_{slide_number}.png")
 
-        # MOCK IMPLEMENTATION - In a real service, this would generate an actual thumbnail
-        create_placeholder_thumbnail(
-            thumbnail_file, slide_width, slide_height, slide_number)
+        # Generate actual thumbnail using PIL
+        create_thumbnail_from_slide(
+            slide, thumbnail_file, slide_width, slide_height)
 
         # Upload thumbnail to Supabase
         thumbnail_url = await upload_file_to_supabase(
@@ -281,9 +283,8 @@ async def process_slide(
             destination_path=f"{session_id}/thumbnails/slide_{slide_number}.png"
         )
 
-    # Extract text elements (this is a simplified example - real implementation would be more complex)
-    # In a real implementation, this would use proper analysis of the slide's shapes
-    shapes = extract_text_elements(slide, slide_width, slide_height)
+    # Extract shapes (text and images)
+    extracted_shapes_data = extract_shapes(slide, slide_width, slide_height)
 
     # Create and return the processed slide
     return ProcessedSlide(
@@ -293,127 +294,322 @@ async def process_slide(
         original_width=slide_width,
         original_height=slide_height,
         thumbnail_url=thumbnail_url,
-        shapes=shapes
+        shapes=extracted_shapes_data
     )
 
 
-def extract_text_elements(slide, slide_width: int, slide_height: int) -> List[SlideShape]:
+def extract_shapes(slide, slide_width: int, slide_height: int) -> List[SlideShape]:
     """
-    Extract text elements from a slide with their coordinates and styles.
-
-    This is a simplified implementation. In a real service, this would use more sophisticated
-    analysis of the slide's text frames, tables, charts, etc.
+    Extract text and image shapes from a slide with their coordinates and styles.
     """
-    shapes = []
+    shapes_data = []
 
-    # Extract text from shapes with text frames
     for idx, shape in enumerate(slide.shapes):
-        if not hasattr(shape, "text"):
-            continue
+        # Get common shape properties (EMU)
+        shape_left_emu = shape.left
+        shape_top_emu = shape.top
+        shape_width_emu = shape.width
+        shape_height_emu = shape.height
 
-        if not shape.text.strip():
-            continue
+        # Convert EMU to points for internal calculations if needed, then to percentage
+        # slide_width and slide_height are passed in EMU
+        x_percent = (shape_left_emu / slide_width) * \
+            100 if slide_width > 0 else 0
+        y_percent = (shape_top_emu / slide_height) * \
+            100 if slide_height > 0 else 0
+        width_percent = (shape_width_emu / slide_width) * \
+            100 if slide_width > 0 else 0
+        height_percent = (shape_height_emu / slide_height) * \
+            100 if slide_height > 0 else 0
 
-        # Get shape coordinates (in points)
-        left = shape.left
-        top = shape.top
-        width = shape.width
-        height = shape.height
+        shape_obj_data = {
+            "shape_id": str(uuid.uuid4()),
+            "x_coordinate": x_percent,
+            "y_coordinate": y_percent,
+            "width": width_percent,
+            "height": height_percent,
+            "coordinates_unit": CoordinateUnit.PERCENTAGE,
+            "reading_order": idx + 1
+        }
 
-        # Convert coordinates to percentages of slide dimensions
-        x_percent = (left / slide_width) * 100
-        y_percent = (top / slide_height) * 100
-        width_percent = (width / slide_width) * 100
-        height_percent = (height / slide_height) * 100
+        if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+            image = shape.image
+            image_bytes = image.blob
+            image_base64_str = base64.b64encode(image_bytes).decode('utf-8')
 
-        # Get basic style information (simplified)
-        font_size = 12.0
-        font_family = "Arial"
-        font_weight = "normal"
-        font_style = "normal"
-        color = "#000000"
+            shape_obj_data.update({
+                "shape_type": ShapeType.IMAGE,
+                "original_text": None,  # No text for a pure image shape
+                "image_content_type": image.content_type,
+                "image_base64": image_base64_str
+            })
+            shapes_data.append(SlideShape(**shape_obj_data))
 
-        if hasattr(shape, "text_frame") and shape.text_frame.paragraphs:
-            # Try to get style from the first run of the first paragraph
-            paragraph = shape.text_frame.paragraphs[0]
-            if paragraph.runs:
-                run = paragraph.runs[0]
-                if hasattr(run, "font"):
-                    font = run.font
-                    if hasattr(font, "size") and font.size:
-                        font_size = font.size.pt
-                    if hasattr(font, "name") and font.name:
-                        font_family = font.name
-                    if hasattr(font, "bold") and font.bold:
-                        font_weight = "bold"
-                    if hasattr(font, "italic") and font.italic:
-                        font_style = "italic"
-                    # Color extraction would be more complex
+        elif shape.has_text_frame:
+            text_frame = shape.text_frame
+            if not text_frame.text or not text_frame.text.strip():
+                continue  # Skip text frames with no actual text
 
-        # Create the shape object
-        shape_obj = SlideShape(
-            shape_id=str(uuid.uuid4()),
-            shape_type=ShapeType.TEXT,
-            original_text=shape.text,
-            x_coordinate=x_percent,
-            y_coordinate=y_percent,
-            width=width_percent,
-            height=height_percent,
-            coordinates_unit=CoordinateUnit.PERCENTAGE,
-            font_size=font_size,
-            font_family=font_family,
-            font_weight=font_weight,
-            font_style=font_style,
-            color=color,
-            reading_order=idx + 1
-        )
+            # Initialize style information with defaults
+            font_size_pt = 12.0
+            font_family = "Arial"
+            font_weight = "normal"
+            font_style = "normal"
+            hex_color = "#000000"
+            text_align_str = "LEFT"
+            vertical_anchor_str = "TOP"
+            line_spacing_val = 1.0
 
-        shapes.append(shape_obj)
+            if text_frame.paragraphs:
+                first_paragraph = text_frame.paragraphs[0]
+                if first_paragraph.alignment:
+                    if first_paragraph.alignment == PP_ALIGN.LEFT:
+                        text_align_str = "LEFT"
+                    elif first_paragraph.alignment == PP_ALIGN.CENTER:
+                        text_align_str = "CENTER"
+                    elif first_paragraph.alignment == PP_ALIGN.RIGHT:
+                        text_align_str = "RIGHT"
+                    elif first_paragraph.alignment == PP_ALIGN.JUSTIFY:
+                        text_align_str = "JUSTIFY"
 
-    # In a real implementation, we would also extract text from:
-    # - Tables (each cell with text)
-    # - Charts (titles, labels, etc.)
-    # - SmartArt
-    # - etc.
+                if first_paragraph.line_spacing:
+                    if isinstance(first_paragraph.line_spacing, float):
+                        line_spacing_val = first_paragraph.line_spacing
+                    elif hasattr(first_paragraph.line_spacing, 'pt'):
+                        base_font_size_for_spacing = 12
+                        line_spacing_val = first_paragraph.line_spacing.pt / base_font_size_for_spacing
 
-    return shapes
+                if first_paragraph.runs:
+                    first_run = first_paragraph.runs[0]
+                    if first_run.font:
+                        font = first_run.font
+                        if font.size:
+                            font_size_pt = font.size.pt
+                        if font.name:
+                            font_family = font.name
+                        if font.bold:
+                            font_weight = "bold"
+                        if font.italic:
+                            font_style = "italic"
+                        if font.color.type == 1 and font.color.rgb:  # MSO_COLOR_TYPE.RGB
+                            hex_color = f"#{font.color.rgb[0]:02x}{font.color.rgb[1]:02x}{font.color.rgb[2]:02x}"
+
+            if text_frame.vertical_anchor:
+                if text_frame.vertical_anchor == MSO_VERTICAL_ANCHOR.TOP:
+                    vertical_anchor_str = "TOP"
+                elif text_frame.vertical_anchor == MSO_VERTICAL_ANCHOR.MIDDLE:
+                    vertical_anchor_str = "MIDDLE"
+                elif text_frame.vertical_anchor == MSO_VERTICAL_ANCHOR.BOTTOM:
+                    vertical_anchor_str = "BOTTOM"
+
+            shape_obj_data.update({
+                "shape_type": ShapeType.TEXT,
+                "original_text": text_frame.text,
+                "font_size": font_size_pt,
+                "font_family": font_family,
+                "font_weight": font_weight,
+                "font_style": font_style,
+                "color": hex_color,
+                "text_align": text_align_str,
+                "vertical_anchor": vertical_anchor_str,
+                "line_spacing": line_spacing_val,
+            })
+            shapes_data.append(SlideShape(**shape_obj_data))
+        # Add other shape type handling here if needed (e.g., tables, charts as text initially)
+
+    return shapes_data
 
 
-def create_placeholder_svg(file_path: str, width: int, height: int, slide_number: int) -> None:
+def create_svg_from_slide(slide, file_path: str, width_emu: int, height_emu: int, slide_number: int) -> None:
     """
-    Create a placeholder SVG file for demonstration purposes.
-
-    In a real implementation, this would be replaced with actual slide-to-SVG conversion.
+    Create an SVG representation of a PowerPoint slide using XML generation.
+    Handles text and image shapes.
     """
-    # Convert points to pixels for SVG (approximate conversion)
-    width_px = int(width * 1.33)
-    height_px = int(height * 1.33)
+    # EMU_PER_INCH, DPI, POINTS_PER_INCH constants remain the same
+    EMU_PER_INCH = 914400
+    DPI = 96
+    POINTS_PER_INCH = 72
 
-    svg_content = f"""<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-    <svg width="{width_px}" height="{height_px}" xmlns="http://www.w3.org/2000/svg">
-        <rect width="100%" height="100%" fill="#ffffff"/>
-        <rect x="10" y="10" width="{width_px-20}" height="{height_px-20}" fill="#f0f0f0" stroke="#cccccc" stroke-width="1"/>
-        <text x="{width_px/2}" y="{height_px/2}" font-family="Arial" font-size="24" text-anchor="middle">Slide {slide_number}</text>
-    </svg>
+    width_px = int((width_emu / EMU_PER_INCH) * DPI)
+    height_px = int((height_emu / EMU_PER_INCH) * DPI)
+
+    svg_root = ET.Element('svg')
+    svg_root.set('xmlns', 'http://www.w3.org/2000/svg')
+    # Add xlink namespace for images
+    svg_root.set('xmlns:xlink', 'http://www.w3.org/1999/xlink')
+    svg_root.set('width', str(width_px))
+    svg_root.set('height', str(height_px))
+    svg_root.set('viewBox', f'0 0 {width_px} {height_px}')
+
+    background = ET.SubElement(svg_root, 'rect')
+    background.set('width', '100%')
+    background.set('height', '100%')
+    background.set('fill', '#ffffff')
+
+    border = ET.SubElement(svg_root, 'rect')
+    border.set('x', '1')
+    border.set('y', '1')
+    border.set('width', str(width_px - 2))
+    border.set('height', str(height_px - 2))
+    border.set('fill', 'none')
+    border.set('stroke', '#e0e0e0')
+    border.set('stroke-width', '1')
+
+    # Fetch all shapes (text and images) once
+    all_shapes_data = extract_shapes(slide, width_emu, height_emu)
+
+    for shape_data in all_shapes_data:
+        x_px_shape = int((shape_data.x_coordinate / 100) * width_px)
+        y_px_shape = int((shape_data.y_coordinate / 100) * height_px)
+        w_px_shape = int((shape_data.width / 100) * width_px)
+        h_px_shape = int((shape_data.height / 100) * height_px)
+
+        if shape_data.shape_type == ShapeType.IMAGE and shape_data.image_base64:
+            image_element = ET.SubElement(svg_root, 'image')
+            image_element.set('x', str(x_px_shape))
+            image_element.set('y', str(y_px_shape))
+            image_element.set('width', str(w_px_shape))
+            image_element.set('height', str(h_px_shape))
+            image_element.set(
+                'xlink:href', f"data:{shape_data.image_content_type};base64,{shape_data.image_base64}")
+            # TODO: Add preserveAspectRatio if needed
+
+        elif shape_data.shape_type == ShapeType.TEXT and shape_data.original_text:
+            text_container = ET.SubElement(svg_root, 'g')
+            text_container.set('class', 'text-shape')
+            text_container.set('id', shape_data.shape_id)
+
+            text_bg = ET.SubElement(text_container, 'rect')
+            text_bg.set('x', str(x_px_shape))
+            text_bg.set('y', str(y_px_shape))
+            text_bg.set('width', str(w_px_shape))
+            text_bg.set('height', str(h_px_shape))
+            text_bg.set('fill', '#f0f0f0')
+            text_bg.set('stroke', '#cccccc')
+            text_bg.set('stroke-width', '0.5')
+            text_bg.set('rx', '1')
+            text_bg.set('ry', '1')
+
+            text_element = ET.SubElement(text_container, 'text')
+            text_element.set('font-family', shape_data.font_family or "Arial")
+            font_size_px = int((shape_data.font_size or 12.0)
+                               * (DPI / POINTS_PER_INCH))
+            text_element.set('font-size', str(font_size_px))
+            if shape_data.font_weight == "bold":
+                text_element.set('font-weight', 'bold')
+            if shape_data.font_style == "italic":
+                text_element.set('font-style', 'italic')
+            text_element.set('fill', shape_data.color or "#000000")
+
+            text_anchor = "start"
+            base_x_for_text_element = x_px_shape + 5
+            if shape_data.text_align == "CENTER":
+                text_anchor = "middle"
+                base_x_for_text_element = x_px_shape + (w_px_shape / 2)
+            elif shape_data.text_align == "RIGHT":
+                text_anchor = "end"
+                base_x_for_text_element = x_px_shape + w_px_shape - 5
+            text_element.set('text-anchor', text_anchor)
+            text_element.set('x', str(base_x_for_text_element))
+
+            dominant_baseline = "auto"
+            y_offset_factor = 0.3
+            if font_size_px > h_px_shape and h_px_shape > 0:
+                y_offset_factor = 0.1 + (h_px_shape / font_size_px) * 0.1
+            elif h_px_shape <= 0:
+                y_offset_factor = 0.0
+
+            if shape_data.vertical_anchor == "MIDDLE":
+                dominant_baseline = "middle"
+                y_offset_factor = 0.5
+            elif shape_data.vertical_anchor == "BOTTOM":
+                dominant_baseline = "text-after-edge"
+                y_offset_factor = 0.9
+            text_element.set('dominant-baseline', dominant_baseline)
+
+            first_line_y = y_px_shape + (h_px_shape * y_offset_factor)
+            if dominant_baseline == "auto":
+                first_line_y = y_px_shape + font_size_px
+            if shape_data.vertical_anchor == "MIDDLE":
+                first_line_y = y_px_shape + (h_px_shape / 2)
+            elif shape_data.vertical_anchor == "BOTTOM":
+                first_line_y = y_px_shape + h_px_shape - (font_size_px * 0.2)
+            text_element.set('y', str(first_line_y))
+
+            lines = shape_data.original_text.splitlines()
+            line_spacing_multiplier = shape_data.line_spacing or 1.15
+            actual_line_height_px = font_size_px * line_spacing_multiplier
+
+            for i, line_text in enumerate(lines):
+                tspan = ET.SubElement(text_element, 'tspan')
+                tspan.text = line_text if line_text else ' '.encode('utf-8')
+                tspan.set('x', str(base_x_for_text_element))
+                if i > 0:
+                    tspan.set('dy', str(actual_line_height_px))
+
+            if not lines:
+                tspan = ET.SubElement(text_element, 'tspan')
+                tspan.text = ' '.encode('utf-8')
+                tspan.set('x', str(base_x_for_text_element))
+
+    # Convert to string and write to file
+    tree = ET.ElementTree(svg_root)
+    ET.register_namespace('', 'http://www.w3.org/2000/svg')
+    tree.write(file_path, encoding='utf-8', xml_declaration=True)
+
+
+def create_thumbnail_from_slide(slide, file_path: str, width: int, height: int) -> None:
     """
-
-    with open(file_path, "w") as f:
-        f.write(svg_content)
-
-
-def create_placeholder_thumbnail(file_path: str, width: int, height: int, slide_number: int) -> None:
-    """
-    Create a placeholder thumbnail image for demonstration purposes.
-
-    In a real implementation, this would be replaced with actual thumbnail generation.
+    Create a thumbnail image for the slide using PIL.
     """
     # Create a blank image with the right aspect ratio
     thumbnail_width = 250
     thumbnail_height = int((height / width) * thumbnail_width)
 
-    # Using PIL to create a simple image
+    # Create a white background image
     image = Image.new(
-        'RGB', (thumbnail_width, thumbnail_height), color=(240, 240, 240))
+        'RGB', (thumbnail_width, thumbnail_height), color=(255, 255, 255))
+
+    # Use PIL's drawing capabilities to sketch the slide content
+    from PIL import ImageDraw, ImageFont
+    draw = ImageDraw.Draw(image)
+
+    # Draw slide border
+    draw.rectangle(
+        [(1, 1), (thumbnail_width-2, thumbnail_height-2)],
+        outline=(200, 200, 200)
+    )
+
+    # Draw text shapes as blocks
+    for shape_idx, shape in enumerate(slide.shapes):
+        if hasattr(shape, 'text') and shape.text.strip():
+            # Calculate position as percentage of slide and apply to thumbnail
+            left_percent = shape.left / width
+            top_percent = shape.top / height
+            width_percent = shape.width / width
+            height_percent = shape.height / height
+
+            # Convert to thumbnail coordinates
+            x = int(left_percent * thumbnail_width)
+            y = int(top_percent * thumbnail_height)
+            w = int(width_percent * thumbnail_width)
+            h = int(height_percent * thumbnail_height)
+
+            # Draw text block
+            draw.rectangle([(x, y), (x+w, y+h)], fill=(240,
+                           240, 240), outline=(180, 180, 180))
+
+            # Add text representation (first few chars)
+            if len(shape.text) > 0:
+                text_preview = shape.text[:10] + \
+                    ('...' if len(shape.text) > 10 else '')
+                try:
+                    # Try to use a default font
+                    draw.text((x+2, y+2), text_preview, fill=(100, 100, 100))
+                except:
+                    # If font issues, just draw a line
+                    draw.line([(x+2, y+h//2), (x+w-2, y+h//2)],
+                              fill=(100, 100, 100))
 
     # Save the image
     image.save(file_path)

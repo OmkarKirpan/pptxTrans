@@ -8,6 +8,7 @@ import uuid
 class ShapeType(str, Enum):
     """Type of shape in a slide."""
     TEXT = "text"
+    IMAGE = "image"
     TABLE_CELL = "table_cell"
     CHART_TEXT = "chart_text"
     SMARTART_TEXT = "smartart_text"
@@ -54,7 +55,7 @@ class SlideShape(BaseModel):
     coordinates_unit: CoordinateUnit = Field(...,
                                              description="Unit of the coordinates")
     font_size: Optional[float] = Field(
-        None, description="Font size of the text")
+        None, description="Font size of the text in points")
     font_family: Optional[str] = Field(
         None, description="Font family of the text")
     font_weight: Optional[str] = Field(
@@ -62,7 +63,17 @@ class SlideShape(BaseModel):
     font_style: Optional[str] = Field(
         None, description="Font style of the text (normal, italic)")
     color: Optional[str] = Field(
-        None, description="Color of the text in hex format")
+        None, description="Color of the text in hex format (e.g., #RRGGBB)")
+    text_align: Optional[str] = Field(
+        None, description="Horizontal alignment of the text (e.g., LEFT, CENTER, RIGHT, JUSTIFY)")
+    vertical_anchor: Optional[str] = Field(
+        None, description="Vertical alignment of the text (e.g., TOP, MIDDLE, BOTTOM)")
+    line_spacing: Optional[float] = Field(
+        None, description="Line spacing of the text (e.g., 1.0 for single, 1.5 for 1.5 lines)")
+    image_content_type: Optional[str] = Field(
+        None, description="MIME type of the image (e.g., image/png, image/jpeg)")
+    image_base64: Optional[str] = Field(
+        None, description="Base64 encoded string of the image data")
     reading_order: Optional[int] = Field(
         None, description="Reading order of the text element (1-based)")
     parent_id: Optional[str] = Field(

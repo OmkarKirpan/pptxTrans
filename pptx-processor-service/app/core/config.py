@@ -1,11 +1,18 @@
 from functools import lru_cache
-from typing import List
+from typing import List, Optional
 import os
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import computed_field
 
 
 class Settings(BaseSettings):
     """Application settings."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=True,
+        extra='ignore'
+    )
 
     # Project info
     PROJECT_NAME: str = "PPTX Processor Microservice"
@@ -13,50 +20,49 @@ class Settings(BaseSettings):
     PROJECT_VERSION: str = "1.0.0"
 
     # API Settings
-    ENVIRONMENT: str = os.getenv("API_ENV", "development")
-    API_HOST: str = os.getenv("API_HOST", "0.0.0.0")
-    API_PORT: int = int(os.getenv("API_PORT", "8000"))
-    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+    ENVIRONMENT: str = "development"
+    API_HOST: str = "0.0.0.0"
+    API_PORT: int = 8000
+    LOG_LEVEL: str = "INFO"
 
     # CORS
-    ALLOWED_ORIGINS: List[str] = os.getenv(
-        "ALLOWED_ORIGINS", "http://localhost:3000").split(",")
 
-    # Redis
-    REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
-    REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
-    REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "")
-    REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
+    @computed_field(return_type=List[str])
+    @property
+    def ALLOWED_ORIGINS(self) -> List[str]:
+        """
+        Returns a list of allowed origins.
+        Parses the "ALLOWED_ORIGINS" environment variable (comma-separated string)
+        or defaults to ["http://localhost:3000"] if the env var is not set or is empty/whitespace.
+        """
+        env_val: Optional[str] = os.getenv("ALLOWED_ORIGINS")
 
-    # Celery
-    CELERY_BROKER_URL: str = os.getenv(
-        "CELERY_BROKER_URL", "redis://localhost:6379/0")
-    CELERY_RESULT_BACKEND: str = os.getenv(
-        "CELERY_RESULT_BACKEND", "redis://localhost:6379/0")
+        origins_list: List[str] = []
+        if env_val is not None:
+            if env_val.strip():
+                origins_list = [origin.strip()
+                                for origin in env_val.split(',') if origin.strip()]
 
-    # Storage
-    TEMP_UPLOAD_DIR: str = os.getenv(
-        "TEMP_UPLOAD_DIR", "/tmp/pptx-processor/uploads")
-    TEMP_PROCESSING_DIR: str = os.getenv(
-        "TEMP_PROCESSING_DIR", "/tmp/pptx-processor/processing")
+        if not origins_list:
+            return ["http://localhost:3000"]
+        return origins_list
+
+    # Storage - Using relative paths for Windows compatibility
+    TEMP_UPLOAD_DIR: str = os.path.join(".", "tmp", "uploads")
+    TEMP_PROCESSING_DIR: str = os.path.join(".", "tmp", "processing")
 
     # Supabase
-    SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
-    SUPABASE_KEY: str = os.getenv("SUPABASE_KEY", "")
-    SUPABASE_STORAGE_BUCKET: str = os.getenv(
-        "SUPABASE_STORAGE_BUCKET", "slide_visuals")
+    SUPABASE_URL: str = ""
+    SUPABASE_KEY: str = ""
+    SUPABASE_STORAGE_BUCKET: str = "slide_visuals"
 
     # Processing settings
     MAX_FILE_SIZE: int = 50 * 1024 * 1024  # 50 MB
     SUPPORTED_FILE_TYPES: List[str] = [
         "application/vnd.openxmlformats-officedocument.presentationml.presentation"]
-    SVG_QUALITY: int = 90  # Quality for SVG conversion (0-100)
+    SVG_QUALITY: int = 90
     GENERATE_THUMBNAILS: bool = True
-    THUMBNAIL_WIDTH: int = 250  # Width in pixels
-
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
+    THUMBNAIL_WIDTH: int = 250
 
 
 @lru_cache()

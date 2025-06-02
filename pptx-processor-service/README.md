@@ -1,130 +1,130 @@
-# PPTX Processor Microservice
+# PPTX Processor Service
 
-A Python-based microservice for converting PowerPoint (PPTX) presentations to SVGs and extracting text data with positioning information. This service is a critical component of the PowerPoint Translator App, enabling high-fidelity slide rendering and text translation while maintaining visual fidelity.
+A simple microservice for converting PowerPoint presentations to SVGs and extracting text data with positioning information.
 
 ## Features
 
-- Convert PPTX slides to high-quality SVG images
+- Convert PPTX slides to SVG format
 - Extract text elements with precise coordinates and styling information
-- Generate slide thumbnails
-- Store processed assets in Supabase Storage
-- Track processing status and provide detailed progress information
-- Asynchronous processing with status updates
-- Health monitoring and diagnostics
-
-## Architecture
-
-The microservice is built with:
-
-- **FastAPI**: Modern, high-performance web framework for building APIs
-- **Python-PPTX**: Library for parsing PowerPoint files
-- **CairoSVG**: SVG rendering and manipulation
-- **Supabase**: Backend-as-a-Service for storage and database operations
-- **Celery** (conceptual): Task queue for handling asynchronous processing
-
-## API Documentation
-
-API documentation is available at:
-
-- Swagger UI: `/docs`
-- ReDoc: `/redoc`
-
-The API follows the OpenAPI 3.1.0 specification, which can be found in [docs/openapi.yaml](./docs/openapi.yaml).
+- Generate thumbnails for each slide
+- Provide metadata for text display in slidecanvas frontend component
+- Store processed assets in Supabase Storage (optional)
 
 ## Getting Started
 
 ### Prerequisites
 
-- Python 3.10+
-- Docker (optional, for containerized deployment)
-- Supabase account and project
+- Python 3.8 or higher
+- UV (package management tool)
 
 ### Installation
 
-1. Clone the repository:
-   ```bash
-   git clone <repository-url>
-   cd pptx-processor-service
-   ```
+1. Clone the repository
+2. Install dependencies with UV:
 
-2. Create a virtual environment:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows, use: venv\Scripts\activate
-   ```
+```bash
+uv pip install -r requirements.txt
+```
 
-3. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+3. Create a `.env` file based on the `env.example` file:
 
-4. Configure environment variables:
-   ```bash
-   cp env.example .env
-   # Edit .env with your configuration
-   ```
+```bash
+# Server
+API_ENV=development
+API_PORT=8000
+API_HOST=0.0.0.0
+LOG_LEVEL=INFO
+
+# Storage paths
+TEMP_UPLOAD_DIR=./tmp/uploads
+TEMP_PROCESSING_DIR=./tmp/processing
+
+# Supabase (update these with your actual values)
+SUPABASE_URL=https://your-project-ref.supabase.co
+SUPABASE_KEY=your-supabase-service-key
+SUPABASE_STORAGE_BUCKET=slide_visuals
+
+# Security
+ALLOWED_ORIGINS=http://localhost:3000
+```
 
 ### Running the Service
 
-#### Development Mode
-
 ```bash
-uvicorn app.main:app --reload
+python main.py
 ```
 
-#### Production Mode
+The API will be available at `http://localhost:8000`.
 
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
+## API Endpoints
 
-#### Docker
-
-```bash
-docker build -t pptx-processor-service .
-docker run -p 8000:8000 -v /tmp/pptx-processor:/tmp/pptx-processor pptx-processor-service
-```
-
-## Integration with PowerPoint Translator App
-
-This microservice is designed to work with the PowerPoint Translator App frontend, which uses the processed SVGs and text data to render slides with interactive text overlays for translation.
-
-The integration workflow:
-
-1. Frontend uploads PPTX file to Supabase Storage
-2. Frontend creates a translation session record in the database
-3. Frontend calls this microservice's `/process` endpoint with the session ID and Supabase credentials
-4. Microservice processes the PPTX, converts slides to SVGs, extracts text data
-5. Microservice uploads SVGs and thumbnails to Supabase Storage
-6. Microservice returns structured data that matches the SlideCanvas component's requirements
-
-## Development
-
-### Project Structure
+### Process a PPTX File
 
 ```
-pptx-processor-service/
-├── app/
-│   ├── api/
-│   │   └── routes/        # API route handlers
-│   ├── core/              # Core configuration and settings
-│   ├── models/            # Pydantic models/schemas
-│   ├── services/          # Business logic services
-│   └── utils/             # Utility functions
-├── docs/                  # Documentation
-├── tests/                 # Test cases
-├── .env.example           # Example environment variables
-├── Dockerfile             # Docker configuration
-├── requirements.txt       # Python dependencies
-└── README.md              # This file
+POST /api/process
 ```
 
-### Testing
+**Form Data:**
+- `file`: The PPTX file to process
+- `session_id`: Unique identifier for the translation session
+- `supabase_url`: The Supabase project URL for storing assets
+- `supabase_key`: The Supabase API key for authorization
+- `source_language` (optional): The source language of the presentation
+- `target_language` (optional): The target language for translation
+- `generate_thumbnails` (optional, default: true): Whether to generate slide thumbnails
 
-```bash
-pytest
+**Response:**
+```json
+{
+  "job_id": "uuid",
+  "session_id": "your-session-id",
+  "status": "QUEUED",
+  "message": "PPTX processing has been queued",
+  "estimated_completion_time": "2025-06-02T12:00:00Z"
+}
 ```
+
+### Check Processing Status
+
+```
+GET /status/{job_id}
+```
+
+**Response:**
+```json
+{
+  "job_id": "uuid",
+  "session_id": "your-session-id",
+  "status": "COMPLETED",
+  "progress": 100,
+  "current_stage": "Processing completed",
+  "completed_at": "2025-06-02T12:05:00Z"
+}
+```
+
+### Health Check
+
+```
+GET /health
+```
+
+## Architecture
+
+This service is built with:
+
+- **FastAPI**: Web framework for API endpoints
+- **Python-PPTX**: Library for parsing PowerPoint files
+- **Custom SVG Generation**: Using ElementTree to generate SVGs without dependencies
+- **Supabase**: Optional storage for assets
+
+## Implementation Notes
+
+- SVG conversion is done by extracting elements from PPTX and rendering to SVG format
+- Text extraction preserves positioning and basic styling information
+- Direct SVG generation avoids dependencies on Cairo or other rendering libraries
+- Asynchronous processing with FastAPI background tasks
+- Compatible with Windows development environment
 
 ## License
 
-[MIT License](LICENSE) 
+MIT 

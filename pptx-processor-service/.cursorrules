@@ -1,0 +1,73 @@
+# Cursor Rules for PPTX Processor Service
+
+## Project Patterns
+
+### Code Organization
+- Follow FastAPI project structure with clear module separation
+- Keep API routes in app/api/routes/
+- Core business logic in app/services/
+- Data models in app/models/
+- Configuration in app/core/
+
+### Coding Standards
+- Use type hints consistently
+- Follow PEP 8 style guidelines
+- Document functions and classes with docstrings
+- Use async/await for I/O-bound operations
+
+### Dependency Management
+- Use UV instead of pip for package management
+- Keep requirements.txt updated with explicit versions
+- Use python-dotenv for environment variables
+- Avoid heavy dependencies when simpler alternatives exist
+
+### Testing
+- Write tests for all business logic (when needed)
+- Use pytest for testing framework
+- Use httpx for API testing
+
+## User Preferences
+- Use memory bank for tracking project knowledge
+- Update memory bank when making significant changes
+- Document design decisions and architecture changes
+- Keep solutions simple and working - avoid overengineering
+- Focus on functionality over complex architecture
+
+## Tool Usage
+- UV for package management: `uv pip install -r requirements.txt`
+- FastAPI for API development
+- Uvicorn for running the development server
+- python-pptx for PPTX parsing
+- Avoid Cairo-based libraries on Windows
+
+## Critical Paths
+- PPTX processing and conversion to SVG
+- Text extraction with positioning
+- Supabase integration for storage
+- Metadata generation for frontend slidecanvas component
+
+## Known Challenges
+- Cairo library dependency on Windows (avoid CairoSVG)
+- Memory usage for large PPTX files
+- Complex slide elements may not convert perfectly
+- Font rendering differences between systems
+- Mock implementation needs to be replaced with real conversion
+
+## Current Issues to Fix
+1. **Cairo Dependency**: Replace CairoSVG with alternative SVG generation
+2. **Mock Implementation**: Implement actual PPTX to SVG conversion
+3. **Overly Complex**: Remove Celery/Redis for simple use cases
+4. **Windows Compatibility**: Ensure cross-platform compatibility
+
+## Recommended Approaches
+1. **For SVG Generation**: Use svgwrite or xml.etree instead of CairoSVG
+2. **For PPTX Conversion**: Extract elements with python-pptx and generate SVG
+3. **For Async Processing**: Use FastAPI BackgroundTasks instead of Celery
+4. **For Storage**: Keep Supabase integration but make it optional for testing
+
+## Implementation Priority
+1. Fix dependencies to make app runnable
+2. Implement basic PPTX to SVG conversion
+3. Extract text with accurate positioning
+4. Generate metadata for frontend
+5. Test with real PPTX files 
