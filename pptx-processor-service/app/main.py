@@ -50,6 +50,16 @@ async def startup_event():
     os.makedirs(settings.TEMP_UPLOAD_DIR, exist_ok=True)
     os.makedirs(settings.TEMP_PROCESSING_DIR, exist_ok=True)
 
+    # Validate Supabase configuration
+    if not settings.validate_supabase_config():
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(
+            "ERROR: Supabase credentials not configured. "
+            "Set SUPABASE_URL and SUPABASE_KEY in environment variables or .env file. "
+            "The service will not be able to store processed assets."
+        )
+
 
 @app.on_event("shutdown")
 async def shutdown_event():

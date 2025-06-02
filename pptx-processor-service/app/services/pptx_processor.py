@@ -31,12 +31,32 @@ from app.models.schemas import (
     ProcessingStatus
 )
 from app.services.supabase_service import upload_file_to_supabase, update_job_status
-from app.services.job_status import update_job_status as update_local_job_status
-from app.core.config import settings  # Import the settings
+from app.services.job_status import update_job_status as update_local_job_status, get_job_status
+# Import get_settings instead of settings
+from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
+# Get settings
+settings = get_settings()
+
 # Removed hardcoded LIBREOFFICE_PATH, will use settings.LIBREOFFICE_PATH
+
+# Dictionary to keep track of job file paths for retry capability
+_job_file_paths = {}
+
+
+async def get_job_file_path(job_id: str) -> Optional[str]:
+    """
+    Get the file path for a job.
+    Returns None if the job doesn't exist or the file has been cleaned up.
+    """
+    # First check our in-memory cache
+    if job_id in _job_file_paths and os.path.exists(_job_file_paths[job_id]):
+        return _job_file_paths[job_id]
+
+    # If not in memory, we can't retrieve it since we don't persistently store file paths
+    return None
 
 
 async def _generate_svgs_for_all_slides_libreoffice(
@@ -152,8 +172,6 @@ async def queue_pptx_processing(
     job_id: str,
     session_id: str,
     file_path: str,
-    supabase_url: str,
-    supabase_key: str,
     source_language: Optional[str] = None,
     target_language: Optional[str] = None,
     generate_thumbnails: bool = True
@@ -161,6 +179,9 @@ async def queue_pptx_processing(
     """
     Queue the PPTX processing task.
     """
+    # Store the file path for potential retry
+    _job_file_paths[job_id] = file_path
+
     await update_local_job_status(
         job_id=job_id,
         status=ProcessingStatusResponse(
@@ -177,8 +198,6 @@ async def queue_pptx_processing(
             job_id=job_id,
             session_id=session_id,
             file_path=file_path,
-            supabase_url=supabase_url,
-            supabase_key=supabase_key,
             source_language=source_language,
             target_language=target_language,
             generate_thumbnails=generate_thumbnails
@@ -190,8 +209,6 @@ async def process_pptx(
     job_id: str,
     session_id: str,
     file_path: str,
-    supabase_url: str,
-    supabase_key: str,
     source_language: Optional[str] = None,
     target_language: Optional[str] = None,
     generate_thumbnails: bool = True
@@ -276,8 +293,6 @@ async def process_pptx(
                 main_processing_dir=processing_output_dir,
                 libreoffice_generated_svg_path=libreoffice_svgs.get(
                     slide_number),  # Pass path if LO generated it
-                supabase_url=supabase_url,
-                supabase_key=supabase_key,
                 session_id=session_id,
                 generate_thumbnail=generate_thumbnails
             )
@@ -297,8 +312,8 @@ async def process_pptx(
             json.dump(result.dict(), f, indent=4)
 
         result_url = await upload_file_to_supabase(
-            file_path=result_file, supabase_url=supabase_url, supabase_key=supabase_key,
-            bucket="processing_results", destination_path=f"{session_id}/result.json"
+            file_path=result_file,
+            bucket="processing-results", destination_path=f"{session_id}/result.json"
         )
 
         await update_local_job_status(
@@ -309,8 +324,8 @@ async def process_pptx(
             )
         )
         await update_job_status(
-            session_id=session_id, status="completed", supabase_url=supabase_url,
-            supabase_key=supabase_key, slide_count=slide_count, result_url=result_url
+            session_id=session_id, status="completed",
+            slide_count=slide_count, result_url=result_url
         )
 
     except Exception as e:
@@ -323,8 +338,7 @@ async def process_pptx(
             )
         )
         await update_job_status(
-            session_id=session_id, status="failed", supabase_url=supabase_url,
-            supabase_key=supabase_key, error=str(e)
+            session_id=session_id, status="failed", error=str(e)
         )
     finally:
         # Clean up the main directory containing the uploaded file and its processing_output
@@ -332,9 +346,16 @@ async def process_pptx(
             # uploaded_file_dir is the parent of processing_output_dir and contains the original upload
             # This was: shutil.rmtree(os.path.dirname(file_path)) which is uploaded_file_dir
             if os.path.exists(uploaded_file_dir):
-                shutil.rmtree(uploaded_file_dir)
-                logger.info(
-                    f"Cleaned up temporary processing directory: {uploaded_file_dir}")
+                # Only clean up if this is not a retry attempt (otherwise we'd lose the file)
+                status = await get_job_status(job_id)
+                if status and status.status != "queued" and status.status != "processing":
+                    shutil.rmtree(uploaded_file_dir)
+                    logger.info(
+                        f"Cleaned up temporary processing directory: {uploaded_file_dir}")
+
+                    # Remove from job file paths cache if we've deleted the file
+                    if job_id in _job_file_paths:
+                        del _job_file_paths[job_id]
         except Exception as e:
             logger.error(
                 f"Error cleaning up temporary files at {uploaded_file_dir}: {str(e)}")
@@ -348,8 +369,6 @@ async def process_slide(
     main_processing_dir: str,
     # Path to LO SVG if pre-generated
     libreoffice_generated_svg_path: Optional[str],
-    supabase_url: str,
-    supabase_key: str,
     session_id: str,
     generate_thumbnail: bool = True
 ) -> ProcessedSlide:
@@ -361,8 +380,11 @@ async def process_slide(
     # slide_assets_dir is already created by process_pptx
     # os.makedirs(slide_assets_dir, exist_ok=True)
 
-    slide_width_emu = int(slide.slide_width)
-    slide_height_emu = int(slide.slide_height)
+    # Get slide dimensions from the presentation's slide master
+    # In python-pptx, slides inherit dimensions from slide masters
+    presentation = slide.part.package.presentation_part.presentation
+    slide_width_emu = presentation.slide_width
+    slide_height_emu = presentation.slide_height
 
     # Extract shapes and their data first, as it's needed for both SVG fallback and final output
     extracted_shapes_data = extract_shapes(
@@ -404,8 +426,7 @@ async def process_slide(
     if svg_file_to_upload and os.path.exists(svg_file_to_upload):
         svg_url = await upload_file_to_supabase(
             file_path=svg_file_to_upload,
-            supabase_url=supabase_url, supabase_key=supabase_key,
-            bucket="slide_visuals", destination_path=f"{session_id}/slide_{slide_number}.svg"
+            bucket="slide-visuals", destination_path=f"{session_id}/slide_{slide_number}.svg"
         )
     else:
         logger.error(
@@ -421,8 +442,7 @@ async def process_slide(
         if os.path.exists(thumbnail_file):
             thumbnail_url = await upload_file_to_supabase(
                 file_path=thumbnail_file,
-                supabase_url=supabase_url, supabase_key=supabase_key,
-                bucket="slide_visuals", destination_path=f"{session_id}/thumbnails/slide_{slide_number}.png"
+                bucket="slide-visuals", destination_path=f"{session_id}/thumbnails/slide_{slide_number}.png"
             )
 
     return ProcessedSlide(

@@ -19,8 +19,6 @@ async def process_pptx(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     session_id: str = Form(...),
-    supabase_url: str = Form(...),
-    supabase_key: str = Form(...),
     source_language: Optional[str] = Form(None),
     target_language: Optional[str] = Form(None),
     generate_thumbnails: bool = Form(True),
@@ -31,8 +29,6 @@ async def process_pptx(
 
     - **file**: The PPTX file to process
     - **session_id**: Unique identifier for the translation session
-    - **supabase_url**: The Supabase project URL for storing assets
-    - **supabase_key**: The Supabase API key for authorization
     - **source_language**: The source language of the presentation
     - **target_language**: The target language for translation
     - **generate_thumbnails**: Whether to generate slide thumbnails
@@ -46,7 +42,7 @@ async def process_pptx(
 
     # Validate Supabase credentials
     try:
-        await validate_supabase_credentials(supabase_url, supabase_key)
+        await validate_supabase_credentials(settings.SUPABASE_URL, settings.SUPABASE_KEY)
     except Exception as e:
         raise HTTPException(
             status_code=401,
@@ -71,8 +67,6 @@ async def process_pptx(
         job_id=job_id,
         session_id=session_id,
         file_path=temp_file_path,
-        supabase_url=supabase_url,
-        supabase_key=supabase_key,
         source_language=source_language,
         target_language=target_language,
         generate_thumbnails=generate_thumbnails
@@ -96,8 +90,6 @@ async def process_batch_pptx(
     files: List[UploadFile] = File(...),
     batch_id: str = Form(...),
     session_ids: List[str] = Form(...),
-    supabase_url: str = Form(...),
-    supabase_key: str = Form(...),
     settings: Settings = Depends(get_settings)
 ):
     """
@@ -106,8 +98,6 @@ async def process_batch_pptx(
     - **files**: The PPTX files to process
     - **batch_id**: Unique identifier for the batch
     - **session_ids**: Unique identifiers for each translation session
-    - **supabase_url**: The Supabase project URL for storing assets
-    - **supabase_key**: The Supabase API key for authorization
     """
     if len(files) != len(session_ids):
         raise HTTPException(
@@ -117,7 +107,7 @@ async def process_batch_pptx(
 
     # Validate Supabase credentials
     try:
-        await validate_supabase_credentials(supabase_url, supabase_key)
+        await validate_supabase_credentials(settings.SUPABASE_URL, settings.SUPABASE_KEY)
     except Exception as e:
         raise HTTPException(
             status_code=401,
@@ -152,8 +142,6 @@ async def process_batch_pptx(
             job_id=job_id,
             session_id=session_id,
             file_path=temp_file_path,
-            supabase_url=supabase_url,
-            supabase_key=supabase_key,
             generate_thumbnails=True
         )
 

@@ -8,7 +8,7 @@ A simple microservice for converting PowerPoint presentations to SVGs and extrac
 - Extract text elements with precise coordinates and styling information
 - Generate thumbnails for each slide
 - Provide metadata for text display in slidecanvas frontend component
-- Store processed assets in Supabase Storage (optional)
+- Store processed assets in Supabase Storage (configured via environment variables)
 
 ## Getting Started
 
@@ -42,7 +42,7 @@ TEMP_PROCESSING_DIR=./tmp/processing
 # Supabase (update these with your actual values)
 SUPABASE_URL=https://your-project-ref.supabase.co
 SUPABASE_KEY=your-supabase-service-key
-SUPABASE_STORAGE_BUCKET=slide_visuals
+SUPABASE_STORAGE_BUCKET=slide-visuals
 
 # Security
 ALLOWED_ORIGINS=http://localhost:3000
@@ -67,8 +67,6 @@ POST /api/process
 **Form Data:**
 - `file`: The PPTX file to process
 - `session_id`: Unique identifier for the translation session
-- `supabase_url`: The Supabase project URL for storing assets
-- `supabase_key`: The Supabase API key for authorization
 - `source_language` (optional): The source language of the presentation
 - `target_language` (optional): The target language for translation
 - `generate_thumbnails` (optional, default: true): Whether to generate slide thumbnails
@@ -115,7 +113,7 @@ This service is built with:
 - **FastAPI**: Web framework for API endpoints
 - **Python-PPTX**: Library for parsing PowerPoint files
 - **Custom SVG Generation**: Using ElementTree to generate SVGs without dependencies
-- **Supabase**: Optional storage for assets
+- **Supabase**: Storage for assets (configured via environment variables)
 
 ## Implementation Notes
 
@@ -124,6 +122,7 @@ This service is built with:
 - Direct SVG generation avoids dependencies on Cairo or other rendering libraries
 - Asynchronous processing with FastAPI background tasks
 - Compatible with Windows development environment
+- Supabase credentials are configured via environment variables, not passed in requests
 
 ## License
 

@@ -9,14 +9,14 @@ from app.services.supabase_service import (
     get_slides_for_session,
     get_shapes_for_slide
 )
+from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 
 async def get_processing_results(
-    session_id: str,
-    supabase_url: Optional[str] = None,
-    supabase_key: Optional[str] = None
+    session_id: str
 ) -> ProcessedPresentation:
     """
     Get the results of a processing job.
@@ -24,23 +24,17 @@ async def get_processing_results(
     This can either:
     1. Load the results from a JSON file stored in Supabase (faster, if available)
     2. Reconstruct the results from the database tables (slides and slide_shapes)
-
-    If Supabase credentials are not provided, it assumes the result JSON is available locally.
     """
     try:
         # First, try to get the session details to get the result URL
-        if supabase_url and supabase_key:
-            session = await get_session_details(session_id, supabase_url, supabase_key)
+        session = await get_session_details(session_id)
 
-            # If the session has a result URL, download and parse it
-            if "result_url" in session and session["result_url"]:
-                return await _get_results_from_json_url(session["result_url"])
+        # If the session has a result URL, download and parse it
+        if "result_url" in session and session["result_url"]:
+            return await _get_results_from_json_url(session["result_url"])
 
-            # Otherwise, reconstruct from database
-            return await _reconstruct_results_from_database(session_id, supabase_url, supabase_key)
-
-        # If no Supabase credentials, try to load from local file
-        return await _get_results_from_local_file(session_id)
+        # Otherwise, reconstruct from database
+        return await _reconstruct_results_from_database(session_id)
 
     except FileNotFoundError:
         # Propagate the FileNotFoundError
@@ -85,19 +79,17 @@ async def _get_results_from_local_file(session_id: str) -> ProcessedPresentation
 
 
 async def _reconstruct_results_from_database(
-    session_id: str,
-    supabase_url: str,
-    supabase_key: str
+    session_id: str
 ) -> ProcessedPresentation:
     """
     Reconstruct the results from the database tables.
     """
     try:
         # Get session details
-        session = await get_session_details(session_id, supabase_url, supabase_key)
+        session = await get_session_details(session_id)
 
         # Get all slides for the session
-        slides_data = await get_slides_for_session(session_id, supabase_url, supabase_key)
+        slides_data = await get_slides_for_session(session_id)
 
         if not slides_data:
             raise FileNotFoundError(
@@ -107,7 +99,7 @@ async def _reconstruct_results_from_database(
         processed_slides = []
         for slide_data in slides_data:
             # Get shapes for the slide
-            shapes_data = await get_shapes_for_slide(slide_data["id"], supabase_url, supabase_key)
+            shapes_data = await get_shapes_for_slide(slide_data["id"])
 
             # Convert shapes data to SlideShape objects
             shapes = []

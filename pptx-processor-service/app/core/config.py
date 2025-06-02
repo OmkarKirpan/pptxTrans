@@ -2,7 +2,7 @@ from functools import lru_cache
 from typing import List, Optional
 import os
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import computed_field
+from pydantic import computed_field, Field
 
 
 class Settings(BaseSettings):
@@ -51,10 +51,13 @@ class Settings(BaseSettings):
     TEMP_UPLOAD_DIR: str = os.path.join(".", "tmp", "uploads")
     TEMP_PROCESSING_DIR: str = os.path.join(".", "tmp", "processing")
 
-    # Supabase
-    SUPABASE_URL: str = ""
-    SUPABASE_KEY: str = ""
-    SUPABASE_STORAGE_BUCKET: str = "slide_visuals"
+    # Supabase - REQUIRED for the service to function
+    SUPABASE_URL: str = Field(
+        "", description="Supabase project URL (e.g., https://yourproject.supabase.co)")
+    SUPABASE_KEY: str = Field(
+        "", description="Supabase service key with permissions for storage and database")
+    SUPABASE_STORAGE_BUCKET: str = Field(
+        "slide-visuals", description="Supabase Storage bucket name for storing processed assets")
 
     # Processing settings
     MAX_FILE_SIZE: int = 50 * 1024 * 1024  # 50 MB
@@ -66,6 +69,21 @@ class Settings(BaseSettings):
 
     TEMP_DIR: str = "/tmp/pptx_processor"  # Example default
     LIBREOFFICE_PATH: Optional[str] = None
+
+    def validate_supabase_config(self) -> bool:
+        """
+        Validates that the required Supabase configuration is present.
+        Returns True if valid, False otherwise.
+        """
+        if not self.SUPABASE_URL or not self.SUPABASE_KEY:
+            return False
+
+        # Basic URL validation
+        if not self.SUPABASE_URL.startswith('http://') and not self.SUPABASE_URL.startswith('https://'):
+            # Auto-fix URLs missing protocol by assuming http://
+            self.SUPABASE_URL = 'http://' + self.SUPABASE_URL
+
+        return True
 
 
 @lru_cache()

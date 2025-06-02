@@ -2,50 +2,127 @@ import os
 import logging
 from typing import Optional, Dict, Any, List
 from supabase import create_client, Client
+from app.core.config import get_settings
+import urllib.parse
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 
-async def validate_supabase_credentials(supabase_url: str, supabase_key: str) -> bool:
+def _normalize_supabase_url(url: str) -> str:
     """
-    Validate that the provided Supabase credentials are valid.
+    Normalize Supabase URL to ensure it's properly formatted.
     """
+    if not url:
+        return ""
+
+    # Ensure URL has a scheme
+    if not url.startswith(('http://', 'https://')):
+        url = 'http://' + url
+
+    # Parse and reconstruct to normalize
+    parsed = urllib.parse.urlparse(url)
+
+    # Remove trailing slashes
+    normalized_url = f"{parsed.scheme}://{parsed.netloc.rstrip('/')}"
+    if parsed.path and parsed.path != '/':
+        normalized_url += parsed.path.rstrip('/')
+
+    return normalized_url
+
+
+def _create_supabase_client(supabase_url: Optional[str] = None, supabase_key: Optional[str] = None) -> Client:
+    """
+    Create a Supabase client with proper error handling.
+    Uses the provided credentials or falls back to settings if not provided.
+    """
+    url = supabase_url or settings.SUPABASE_URL
+    key = supabase_key or settings.SUPABASE_KEY
+
+    if not url:
+        raise ValueError("Supabase URL is not configured")
+    if not key:
+        raise ValueError("Supabase API key is not configured")
+
+    # Normalize the URL to ensure it's properly formatted
+    normalized_url = _normalize_supabase_url(url)
+
     try:
-        supabase = create_client(supabase_url, supabase_key)
-        # Make a simple request to validate credentials
-        response = supabase.auth.get_user(supabase_key)
-        return response is not None
+        return create_client(normalized_url, key)
+    except Exception as e:
+        logger.error(f"Error creating Supabase client: {str(e)}")
+        raise Exception(f"Failed to create Supabase client: {str(e)}")
+
+
+async def validate_supabase_credentials(supabase_url: Optional[str] = None, supabase_key: Optional[str] = None) -> bool:
+    """
+    Validate that the Supabase credentials are valid.
+    Uses the provided credentials or falls back to settings if not provided.
+    """
+    url = supabase_url or settings.SUPABASE_URL
+    key = supabase_key or settings.SUPABASE_KEY
+
+    if not url:
+        raise ValueError("Supabase URL is not configured")
+    if not key:
+        raise ValueError("Supabase API key is not configured")
+
+    # Normalize the URL to ensure it's properly formatted
+    normalized_url = _normalize_supabase_url(url)
+
+    try:
+        client = create_client(normalized_url, key)
+        # Simply check if we can create a client and get a response
+        # This is a lightweight check that doesn't require specific permissions
+        storage_buckets = client.storage.list_buckets()
+        return True
     except Exception as e:
         logger.error(f"Error validating Supabase credentials: {str(e)}")
         raise Exception(f"Invalid Supabase credentials: {str(e)}")
 
 
-async def check_supabase_connection(supabase_url: str, supabase_key: str) -> bool:
+async def check_supabase_connection(supabase_url: Optional[str] = None, supabase_key: Optional[str] = None) -> bool:
     """
     Check if we can connect to Supabase.
+    Uses the provided credentials or falls back to settings if not provided.
     """
     try:
-        supabase = create_client(supabase_url, supabase_key)
-        # Make a simple request
-        await supabase.table("health_check").select("*").limit(1).execute()
-        return True
+        url = supabase_url or settings.SUPABASE_URL
+        key = supabase_key or settings.SUPABASE_KEY
+
+        if not url or not key:
+            logger.warning("Supabase credentials not configured")
+            return False
+
+        # Normalize the URL to ensure it's properly formatted
+        normalized_url = _normalize_supabase_url(url)
+
+        try:
+            client = create_client(normalized_url, key)
+
+            # Just try to list buckets as a basic connectivity test
+            client.storage.list_buckets()
+            return True
+        except Exception as e:
+            logger.error(f"Error connecting to Supabase: {str(e)}")
+            return False
     except Exception as e:
-        logger.error(f"Error connecting to Supabase: {str(e)}")
+        logger.error(
+            f"Unexpected error in check_supabase_connection: {str(e)}")
         return False
 
 
 async def upload_file_to_supabase(
     file_path: str,
-    supabase_url: str,
-    supabase_key: str,
     bucket: str,
     destination_path: str
 ) -> str:
     """
     Upload a file to Supabase Storage and return the public URL.
+    Uses Supabase credentials from settings.
     """
     try:
-        supabase = create_client(supabase_url, supabase_key)
+        supabase = _create_supabase_client()
 
         # Check if the bucket exists, create it if not
         buckets = supabase.storage.list_buckets()
@@ -73,17 +150,16 @@ async def upload_file_to_supabase(
 async def update_job_status(
     session_id: str,
     status: str,
-    supabase_url: str,
-    supabase_key: str,
     slide_count: Optional[int] = None,
     result_url: Optional[str] = None,
     error: Optional[str] = None
 ) -> None:
     """
     Update the status of a translation session in Supabase.
+    Uses Supabase credentials from settings.
     """
     try:
-        supabase = create_client(supabase_url, supabase_key)
+        supabase = _create_supabase_client()
 
         # Prepare the update data
         data = {"status": status}
@@ -109,15 +185,14 @@ async def update_job_status(
 
 async def save_slide_data(
     session_id: str,
-    slide_data: Dict[str, Any],
-    supabase_url: str,
-    supabase_key: str
+    slide_data: Dict[str, Any]
 ) -> str:
     """
     Save slide data to the slides table in Supabase.
+    Uses Supabase credentials from settings.
     """
     try:
-        supabase = create_client(supabase_url, supabase_key)
+        supabase = _create_supabase_client()
 
         # Prepare the slide data
         data = {
@@ -142,15 +217,14 @@ async def save_slide_data(
 
 async def save_slide_shapes(
     slide_id: str,
-    shapes: List[Dict[str, Any]],
-    supabase_url: str,
-    supabase_key: str
+    shapes: List[Dict[str, Any]]
 ) -> None:
     """
     Save slide shape data to the slide_shapes table in Supabase.
+    Uses Supabase credentials from settings.
     """
     try:
-        supabase = create_client(supabase_url, supabase_key)
+        supabase = _create_supabase_client()
 
         # Prepare the shape data
         data = []
@@ -183,15 +257,14 @@ async def save_slide_shapes(
 
 
 async def get_session_details(
-    session_id: str,
-    supabase_url: str,
-    supabase_key: str
+    session_id: str
 ) -> Dict[str, Any]:
     """
     Get details of a translation session from Supabase.
+    Uses Supabase credentials from settings.
     """
     try:
-        supabase = create_client(supabase_url, supabase_key)
+        supabase = _create_supabase_client()
 
         # Query the session record
         response = supabase.table("translation_sessions").select(
@@ -209,15 +282,14 @@ async def get_session_details(
 
 
 async def get_slides_for_session(
-    session_id: str,
-    supabase_url: str,
-    supabase_key: str
+    session_id: str
 ) -> List[Dict[str, Any]]:
     """
     Get all slides for a translation session from Supabase.
+    Uses Supabase credentials from settings.
     """
     try:
-        supabase = create_client(supabase_url, supabase_key)
+        supabase = _create_supabase_client()
 
         # Query the slides for the session
         response = supabase.table("slides").select(
@@ -231,15 +303,14 @@ async def get_slides_for_session(
 
 
 async def get_shapes_for_slide(
-    slide_id: str,
-    supabase_url: str,
-    supabase_key: str
+    slide_id: str
 ) -> List[Dict[str, Any]]:
     """
     Get all shapes for a slide from Supabase.
+    Uses Supabase credentials from settings.
     """
     try:
-        supabase = create_client(supabase_url, supabase_key)
+        supabase = _create_supabase_client()
 
         # Query the shapes for the slide
         response = supabase.table("slide_shapes").select(
