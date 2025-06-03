@@ -1,0 +1,92 @@
+# Cursor Rules for PPTX Processor Service
+
+## Project Patterns
+
+### Code Organization
+- Follow FastAPI project structure with clear module separation
+- Keep API routes in app/api/routes/
+- Core business logic in app/services/
+- Data models in app/models/
+- Configuration in app/core/
+
+### Coding Standards
+- Use type hints consistently
+- Follow PEP 8 style guidelines
+- Document functions and classes with docstrings
+- Use async/await for I/O-bound operations
+
+### Dependency Management
+- Use UV instead of pip for package management
+- Keep requirements.txt updated with explicit versions
+- Use python-dotenv for environment variables
+- Avoid heavy dependencies when simpler alternatives exist
+
+### Testing
+- Write tests for all business logic (when needed)
+- Use pytest for testing framework
+- Use httpx for API testing
+
+## User Preferences
+- Use memory bank for tracking project knowledge
+- Update memory bank when making significant changes
+- Document design decisions and architecture changes
+- Keep solutions simple and working - avoid overengineering
+- Focus on functionality over complex architecture
+
+## Tool Usage
+- UV for package management: `uv pip install -r requirements.txt`
+- FastAPI for API development
+- Uvicorn for running the development server
+- python-pptx for PPTX parsing
+- Avoid Cairo-based libraries on Windows
+
+## Critical Paths
+- PPTX processing and conversion to SVG
+- Text extraction with positioning
+- Supabase integration for storage
+- Metadata generation for frontend slidecanvas component
+
+## Known Issues and Solutions
+
+### 1. Slide Dimensions
+- Use `presentation.slide_width` NOT `slide.slide_width`
+- Access via: `slide.part.package.presentation_part.presentation`
+
+### 2. MSO_VERTICAL_ANCHOR Values
+- Only use: TOP, MIDDLE, BOTTOM
+- Do NOT use: TOP_CENTERED, MIDDLE_CENTERED, BOTTOM_CENTERED (don't exist)
+
+### 3. Supabase Storage RLS
+- For development: Disable RLS on tables
+- Create buckets manually in Supabase Studio
+- Use public buckets for development
+
+### 4. LibreOffice on Windows
+- Path example: "C:/Program Files/LibreOffice/program/soffice.exe"
+- If not working, fallback to ElementTree SVG generation
+- Check stderr for debug info
+
+### 5. URL Validation
+- Always normalize Supabase URLs (add http:// if missing)
+- Use urllib.parse for URL normalization
+
+## Current State (as of last update)
+1. **Working**: Basic PPTX to SVG conversion with ElementTree fallback
+2. **Working**: Supabase storage integration
+3. **Working**: Job tracking and retry mechanism
+4. **Issue**: LibreOffice SVG generation not producing output on Windows
+5. **Fixed**: Slide dimensions access, MSO_VERTICAL_ANCHOR enums, URL validation
+
+## Development Workflow
+1. Run Supabase locally: `supabase start`
+2. Apply database schema: Run supabase_setup.sql in SQL Editor
+3. Create storage buckets manually in Supabase Studio
+4. Start API: `uvicorn main:app --reload`
+5. Test at http://localhost:8000/docs
+
+## Debugging Tips
+1. Check logs for detailed error messages
+2. Verify Supabase connection at /health/health endpoint
+3. Use fallback SVG generation if LibreOffice fails
+4. For RLS errors, check bucket/table policies in Supabase Studio
+5. For file not found errors, check the cleanup logic in process_pptx 
