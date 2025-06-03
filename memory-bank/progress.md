@@ -4,8 +4,13 @@
 (Note: Some features in the frontend still rely on mock data until full integration is completed.)
 
 - **User Authentication:**
-    - Login Page (`app/auth/login/page.tsx`): Functional with Supabase email/password authentication.
+    - Login Page (`app/auth/login/page.tsx`): Functional with Supabase email/password authentication. Enhanced with support for success messages from password reset flow.
     - Signup Page (`app/auth/signup/page.tsx`): Functional with Supabase email/password registration, including basic password validation and confirmation messages.
+    - **Forgot Password Flow (COMPLETED):**
+        - Forgot Password Request Page (`app/auth/forgot-password/page.tsx`): Complete email input form with Supabase integration
+        - Password Reset Page (`app/auth/reset-password/page.tsx`): Complete password update form with session validation
+        - Auth Callback Handler (`app/auth/callback/route.ts`): Handles email link redirects for password reset
+        - Full security implementation with generic messages and proper session handling
 
 - **PPTX Processor Service:**
     - Standalone Python FastAPI microservice (`pptx-processor-service/`) for handling PPTX conversion

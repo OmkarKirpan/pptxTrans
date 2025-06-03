@@ -15,8 +15,7 @@ import { Loader2, Save, Eye, EyeOff } from "lucide-react"
 const passwordFormSchema = z.object({
   currentPassword: z.string().min(1, "Current password is required"),
   newPassword: z.string()
-    .min(8, "Password must be at least 8 characters")
-    .regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/, "Password must contain at least one lowercase letter, one uppercase letter, and one number"),
+    .min(6, "Password must be at least 6 characters"),
   confirmPassword: z.string().min(1, "Please confirm your password"),
 }).refine((data) => data.newPassword === data.confirmPassword, {
   message: "Passwords don't match",
@@ -49,15 +48,16 @@ export default function PasswordChangeForm() {
     let score = 0
     let feedback = ""
 
-    if (password.length >= 8) score += 25
-    if (/[a-z]/.test(password)) score += 25
-    if (/[A-Z]/.test(password)) score += 25
-    if (/\d/.test(password)) score += 25
+    if (password.length >= 6) score += 40
+    if (password.length >= 8) score += 20
+    if (/[a-z]/.test(password)) score += 20
+    if (/[A-Z]/.test(password)) score += 20
+    if (/\d/.test(password)) score += 20
     if (/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) score += 10
 
-    if (score < 25) feedback = "Very weak"
-    else if (score < 50) feedback = "Weak"
-    else if (score < 75) feedback = "Fair"
+    if (score < 30) feedback = "Very weak"
+    else if (score < 60) feedback = "Weak"
+    else if (score < 80) feedback = "Fair"
     else if (score < 100) feedback = "Good"
     else feedback = "Strong"
 
@@ -231,10 +231,10 @@ export default function PasswordChangeForm() {
       <div className="rounded-md bg-muted p-4">
         <h4 className="text-sm font-medium mb-2">Password Requirements:</h4>
         <ul className="text-xs text-muted-foreground space-y-1">
-          <li>• At least 8 characters long</li>
-          <li>• Contains at least one lowercase letter</li>
-          <li>• Contains at least one uppercase letter</li>
-          <li>• Contains at least one number</li>
+          <li>• At least 6 characters long</li>
+          <li>• For better security, consider including:</li>
+          <li className="ml-4">- Uppercase and lowercase letters</li>
+          <li className="ml-4">- Numbers and special characters</li>
         </ul>
       </div>
 
