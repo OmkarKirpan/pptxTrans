@@ -6,7 +6,7 @@ import type { TranslationSession } from "@/types"
 import { redirect } from "next/navigation" // For redirecting if not authenticated
 
 export default async function DashboardPage() {
-  const supabase = createSupabaseServerClient()
+  const supabase = await createSupabaseServerClient()
 
   const {
     data: { user },
