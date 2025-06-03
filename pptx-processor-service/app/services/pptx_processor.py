@@ -61,111 +61,157 @@ async def get_job_file_path(job_id: str) -> Optional[str]:
 
 async def _generate_svgs_for_all_slides_libreoffice(
     presentation_path: str,
-    output_dir: str,
+    output_dir: str,  # This will be the directory where final slide_N.svg files are stored
     slide_count: int
 ) -> Dict[int, str]:
     """
-    Convert all slides from a presentation to SVGs using a single LibreOffice call.
-
-    Args:
-        presentation_path: Path to the PPTX presentation file.
-        output_dir: Directory to save the output SVG files.
-        slide_count: The total number of slides in the presentation.
-
-    Returns:
-        A dictionary mapping 1-based slide numbers to their SVG file paths.
-        Returns an empty dictionary if conversion fails or LibreOffice is not configured.
+    Convert each slide from a presentation to an individual SVG file using LibreOffice.
+    Iterates through slides and calls LibreOffice for each one.
     """
     if not settings.LIBREOFFICE_PATH or not os.path.exists(settings.LIBREOFFICE_PATH):
         logger.warning(
             "LibreOffice path not configured or invalid. Skipping LibreOffice SVG generation.")
         return {}
 
-    temp_svg_conversion_dir = os.path.join(output_dir, "lo_svg_conversion")
-    os.makedirs(temp_svg_conversion_dir, exist_ok=True)
+    abs_presentation_path = os.path.abspath(presentation_path)
+    if not os.path.exists(abs_presentation_path):
+        logger.error(
+            f"Absolute presentation path not found: {abs_presentation_path}")
+        return {}
+
+    # Temporary directory for LibreOffice to write individual SVG outputs before renaming/moving
+    # This main temp dir will contain uniquely named SVGs from each LO call.
+    temp_lo_svg_output_dir = os.path.join(
+        output_dir, f"lo_indiv_svg_temp_{uuid.uuid4().hex[:8]}")
+    os.makedirs(temp_lo_svg_output_dir, exist_ok=True)
+    abs_temp_lo_svg_output_dir = os.path.abspath(temp_lo_svg_output_dir)
 
     generated_svg_paths: Dict[int, str] = {}
 
-    try:
-        logger.info(
-            f"Attempting to convert all slides of {presentation_path} to SVG using LibreOffice into {temp_svg_conversion_dir}")
-        command = [
-            settings.LIBREOFFICE_PATH,
-            "--headless",
-            "--convert-to", 'svg:"impress_svg_Export"',  # Using the specific export filter
-            "--outdir", temp_svg_conversion_dir,
-            presentation_path
-        ]
+    for i in range(slide_count):
+        slide_number = i + 1  # Slide numbers are 1-based
+        # LibreOffice page numbers for export are often 1-based.
+        # Output filename from LO will usually be <original_filename_without_ext>_page_<page_number>.svg
+        # or just <original_filename_without_ext>.svg if it can only output one file.
+        # We will try to make the output file specific to avoid overwrites in the temp dir.
 
-        process = subprocess.run(
-            command,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=300  # 5 minutes timeout
-        )
-        logger.info(f"LibreOffice full conversion output: {process.stdout}")
-        if process.stderr:
-            logger.warning(f"LibreOffice conversion stderr: {process.stderr}")
+        # The actual output filename by LibreOffice when converting a single page from a multi-page doc
+        # with --export-page and --outdir can be just the original filename with new extension.
+        # To handle this safely and ensure unique files in our temp dir from each call,
+        # we can tell LO to output to a sub-directory per slide, or rename immediately.
+        # Simpler: use outdir, and expect LO to name the file as presentation_name.svg.
+        # We then rename this to our slide_N.svg convention.
 
-        # LibreOffice typically names the main file based on the presentation name,
-        # and subsequent files if it splits them (though for SVG it's often one file per slide with predictable names if the filter is right)
-        # However, the 'impress_svg_Export' filter with --convert-to svg often produces one .svg file
-        # for the *entire presentation* or one svg file per slide named like 'filename1.svg', 'filename2.svg' etc.
-        # Let's list all SVGs in the output directory.
+        # Let LO write its default name (e.g., original_filename.svg) into the temp output dir.
+        # We will move and rename it after successful conversion of *this specific slide*.
 
-        svg_files_in_temp = sorted(
-            glob.glob(os.path.join(temp_svg_conversion_dir, "*.svg")))
+        # Construct the expected output file name by LibreOffice (usually original_filename.svg)
+        presentation_basename = os.path.splitext(
+            os.path.basename(abs_presentation_path))[0]
+        expected_lo_output_filename = f"{presentation_basename}.svg"
+        # This is the path where LO will place its output for the current slide conversion
+        current_slide_lo_output_path = os.path.join(
+            abs_temp_lo_svg_output_dir, expected_lo_output_filename)
 
-        if not svg_files_in_temp:
-            logger.error(
-                "LibreOffice conversion ran but no SVG files were found in the output directory.")
-            return {}
+        # Delete this expected output file if it exists from a previous iteration (unlikely with unique temp dir per call now)
+        # but good for safety if LO overwrites.
+        if os.path.exists(current_slide_lo_output_path):
+            try:
+                os.remove(current_slide_lo_output_path)
+            except OSError as e:
+                logger.warning(
+                    f"Could not remove existing temp LO output {current_slide_lo_output_path}: {e}")
 
-        # If 'impress_svg_Export' produces one file per slide, they should be named sequentially.
-        # Example: presentation.svg, presentation1.svg, presentation2.svg ...
-        # Or, it might be simpler: slide1.svg, slide2.svg (if the input was already a single slide temp file)
-        # Since we are converting the whole presentation, the naming might be like 'original_filename.svg' for the first,
-        # then 'original_filename-1.svg', 'original_filename-2.svg' etc. OR 'original_filename-0.svg', 'original_filename-1.svg'
-        # This behavior can be inconsistent. A robust way is to check the number of files.
-
-        if len(svg_files_in_temp) == slide_count:
+        try:
             logger.info(
-                f"LibreOffice generated {len(svg_files_in_temp)} SVG files, matching slide count.")
-            for i, temp_svg_path in enumerate(svg_files_in_temp):
-                slide_num = i + 1  # 1-based index
-                final_svg_name = f"slide_{slide_num}.svg"
-                final_svg_path = os.path.join(output_dir, final_svg_name)
-                shutil.move(temp_svg_path, final_svg_path)
-                generated_svg_paths[slide_num] = final_svg_path
-                logger.info(
-                    f"Moved {temp_svg_path} to {final_svg_path} for slide {slide_num}")
-        elif svg_files_in_temp:
-            # If a single SVG is produced for the whole presentation, or naming is unpredictable, this approach is problematic.
-            # For now, we assume one file per slide if count matches.
-            # If not, it's safer to report failure for this optimized path.
-            logger.warning(
-                f"LibreOffice generated {len(svg_files_in_temp)} SVGs, but expected {slide_count}. SVG mapping might be incorrect.")
-            # Clean up if we can't reliably map
-            for temp_svg_path in svg_files_in_temp:
-                os.remove(temp_svg_path)
-            return {}
+                f"Attempting to convert slide {slide_number} of {slide_count} from {abs_presentation_path} to SVG")
 
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Error running LibreOffice for full conversion: {e}")
-        logger.error(f"Command output: {e.stdout}")
-        logger.error(f"Command error: {e.stderr}")
-        return {}
-    except subprocess.TimeoutExpired:
-        logger.error("LibreOffice conversion timed out for full presentation.")
-        return {}
-    except Exception as e:
-        logger.error(
-            f"Unexpected error during LibreOffice full conversion: {str(e)}")
-        return {}
-    finally:
-        if os.path.exists(temp_svg_conversion_dir):
-            shutil.rmtree(temp_svg_conversion_dir)
+            # Command to export a single page (slide)
+            # Using --export-filter-options="PageRange=<page_num>" might be more robust for impress
+            # or simply --page <page_num> or --select-page <page_num> (syntax varies)
+            # The most common for Impress seems to be an export filter option like PageRange=N
+            # Let's try with a filter option. Page numbers are usually 1-based.
+            # Filter options format: PageRange=N for a single page N (1-based).
+            # Or PageRange=N-M for a range. We need PageRange=slide_number.
+            # The filter name is impress_svg_Export. Options are appended after a colon.
+            # Example: "impress_svg_Export:PageRange=1"
+            # For SVG, some use "impress_svg_Export:SVGPages=1" (1 for current, 2 for all)
+            # The --page option in soffice man page: --page <range>
+            # Example: --page 1-1 for first page. Let's try this as it's simpler.
+
+            command = [
+                settings.LIBREOFFICE_PATH,
+                "--headless",
+                # "--convert-to", f'svg:impress_svg_Export:PageRange={slide_number}', # This is complex and might not be right
+                "--convert-to", "svg:impress_svg_Export",  # Keep filter simple
+                # Added export-page argument
+                f"--export-page", str(slide_number),
+                "--outdir", abs_temp_lo_svg_output_dir,  # Output to our general temp LO dir
+                abs_presentation_path
+            ]
+
+            process = subprocess.run(
+                command,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=120  # Shorter timeout for single slide
+            )
+            logger.info(
+                f"LibreOffice SVG conversion for slide {slide_number} stdout: {process.stdout}")
+            if process.stderr:
+                logger.warning(
+                    f"LibreOffice SVG conversion for slide {slide_number} stderr: {process.stderr}")
+
+            # After conversion, LibreOffice should have created a file (e.g., originalfilename.svg) in abs_temp_lo_svg_output_dir
+            if os.path.exists(current_slide_lo_output_path):
+                final_svg_name = f"slide_{slide_number}.svg"
+                # Place in final output_dir
+                final_svg_path = os.path.join(output_dir, final_svg_name)
+                shutil.move(current_slide_lo_output_path, final_svg_path)
+                generated_svg_paths[slide_number] = final_svg_path
+                logger.info(
+                    f"Successfully converted and moved slide {slide_number} to {final_svg_path}")
+            else:
+                logger.error(
+                    f"LibreOffice converted slide {slide_number}, but expected output file {current_slide_lo_output_path} not found.")
+                # If one slide fails, we might want to stop or continue and use fallback for this one.
+                # For now, let's return empty to trigger fallback for all if any single slide fails this way.
+                # return {} # This would stop all LO processing
+                # Better: just skip this slide, allow fallback for it later
+                continue
+
+        except subprocess.CalledProcessError as e:
+            logger.error(
+                f"Error running LibreOffice for SVG conversion of slide {slide_number}: {e}")
+            logger.error(
+                f"SVG Command (slide {slide_number}) output: {e.stdout}")
+            logger.error(
+                f"SVG Command (slide {slide_number}) error: {e.stderr}")
+            continue  # Continue to next slide, allow fallback for this one
+        except subprocess.TimeoutExpired:
+            logger.error(
+                f"LibreOffice SVG conversion for slide {slide_number} timed out.")
+            continue  # Continue to next slide, allow fallback for this one
+        except Exception as e:
+            logger.error(
+                f"Unexpected error during LibreOffice SVG conversion for slide {slide_number}: {str(e)}", exc_info=True)
+            continue  # Continue to next slide, allow fallback for this one
+
+    # Clean up the main temporary directory for LO outputs if it still exists and is empty
+    # (individual files should have been moved or handled)
+    if os.path.exists(abs_temp_lo_svg_output_dir):
+        try:
+            if not os.listdir(abs_temp_lo_svg_output_dir):  # Check if empty
+                shutil.rmtree(abs_temp_lo_svg_output_dir)
+                logger.info(
+                    f"Cleaned up empty temporary LibreOffice individual SVG output directory: {abs_temp_lo_svg_output_dir}")
+            else:
+                logger.warning(
+                    f"Temporary LibreOffice individual SVG output directory {abs_temp_lo_svg_output_dir} is not empty. Manual check may be needed.")
+        except Exception as e:
+            logger.error(
+                f"Error cleaning up temp LO individual SVG dir {abs_temp_lo_svg_output_dir}: {e}")
 
     return generated_svg_paths
 

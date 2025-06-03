@@ -46,8 +46,8 @@ class SlideShape(BaseModel):
     """A text shape on a slide."""
     shape_id: str = Field(..., description="Unique identifier for the shape")
     shape_type: ShapeType = Field(..., description="Type of the shape")
-    original_text: str = Field(...,
-                               description="Original text content of the shape")
+    original_text: Optional[str] = Field(None,
+                                         description="Original text content of the shape (if any)")
     x_coordinate: float = Field(..., description="X coordinate of the shape")
     y_coordinate: float = Field(..., description="Y coordinate of the shape")
     width: float = Field(..., description="Width of the shape")

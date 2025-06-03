@@ -44,11 +44,28 @@ def _create_supabase_client(supabase_url: Optional[str] = None, supabase_key: Op
     if not key:
         raise ValueError("Supabase API key is not configured")
 
+    # Clean the values - remove inline comments and quotes
+    # python-dotenv reads the entire line including comments
+    if '#' in url:
+        url = url.split('#')[0].strip()
+    if '#' in key:
+        key = key.split('#')[0].strip()
+
+    # Clean the key - remove whitespace, newlines and quotes
+    clean_key = key.strip().replace('\n', '').replace('\r', '')
+    if clean_key.startswith('"') and clean_key.endswith('"'):
+        clean_key = clean_key[1:-1]
+
+    # Clean the URL - remove quotes
+    clean_url = url.strip()
+    if clean_url.startswith('"') and clean_url.endswith('"'):
+        clean_url = clean_url[1:-1]
+
     # Normalize the URL to ensure it's properly formatted
-    normalized_url = _normalize_supabase_url(url)
+    normalized_url = _normalize_supabase_url(clean_url)
 
     try:
-        return create_client(normalized_url, key)
+        return create_client(normalized_url, clean_key)
     except Exception as e:
         logger.error(f"Error creating Supabase client: {str(e)}")
         raise Exception(f"Failed to create Supabase client: {str(e)}")
@@ -66,6 +83,18 @@ async def validate_supabase_credentials(supabase_url: Optional[str] = None, supa
         raise ValueError("Supabase URL is not configured")
     if not key:
         raise ValueError("Supabase API key is not configured")
+
+    # Clean the values - remove inline comments and quotes
+    if '#' in url:
+        url = url.split('#')[0].strip()
+    if '#' in key:
+        key = key.split('#')[0].strip()
+
+    # Remove quotes if present
+    if url.startswith('"') and url.endswith('"'):
+        url = url[1:-1]
+    if key.startswith('"') and key.endswith('"'):
+        key = key[1:-1]
 
     # Normalize the URL to ensure it's properly formatted
     normalized_url = _normalize_supabase_url(url)
@@ -96,15 +125,52 @@ async def check_supabase_connection(supabase_url: Optional[str] = None, supabase
 
         # Normalize the URL to ensure it's properly formatted
         normalized_url = _normalize_supabase_url(url)
+        logger.debug(f"Checking Supabase connection to: {normalized_url}")
+
+        # Print the first few characters of the key for debugging
+        if key and len(key) > 10:
+            logger.debug(f"Using API key starting with: {key[:10]}...")
+
+        # Clean the values - remove inline comments
+        if '#' in url:
+            url = url.split('#')[0].strip()
+        if '#' in key:
+            key = key.split('#')[0].strip()
+
+        # Clean the key - remove whitespace, newlines and quotes
+        clean_key = key.strip().replace('\n', '').replace('\r', '')
+        if clean_key.startswith('"') and clean_key.endswith('"'):
+            clean_key = clean_key[1:-1]
+
+        # Clean the URL - remove quotes
+        clean_url = url.strip()
+        if clean_url.startswith('"') and clean_url.endswith('"'):
+            clean_url = clean_url[1:-1]
+
+        # Re-normalize after cleaning
+        normalized_url = _normalize_supabase_url(clean_url)
+
+        logger.debug(
+            f"Key length before cleaning: {len(key)}, after cleaning: {len(clean_key)}")
 
         try:
-            client = create_client(normalized_url, key)
+            client = create_client(normalized_url, clean_key)
+            logger.debug("Successfully created Supabase client")
 
             # Just try to list buckets as a basic connectivity test
-            client.storage.list_buckets()
+            buckets = client.storage.list_buckets()
+            logger.debug(
+                f"Successfully listed buckets: {len(buckets)} buckets found")
             return True
         except Exception as e:
             logger.error(f"Error connecting to Supabase: {str(e)}")
+            # Try to diagnose the error
+            if "API key" in str(e).lower() or "auth" in str(e).lower() or "unauthorized" in str(e).lower():
+                logger.error(
+                    "This appears to be an API key issue. Check your SUPABASE_KEY value.")
+            elif "URL" in str(e).upper() or "host" in str(e).lower() or "connection" in str(e).lower():
+                logger.error(
+                    "This appears to be a URL/connection issue. Check your SUPABASE_URL value.")
             return False
     except Exception as e:
         logger.error(

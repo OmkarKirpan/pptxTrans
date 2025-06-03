@@ -46,28 +46,47 @@
 - Supabase integration for storage
 - Metadata generation for frontend slidecanvas component
 
-## Known Challenges
-- Cairo library dependency on Windows (avoid CairoSVG)
-- Memory usage for large PPTX files
-- Complex slide elements may not convert perfectly
-- Font rendering differences between systems
-- Mock implementation needs to be replaced with real conversion
+## Known Issues and Solutions
 
-## Current Issues to Fix
-1. **Cairo Dependency**: Replace CairoSVG with alternative SVG generation
-2. **Mock Implementation**: Implement actual PPTX to SVG conversion
-3. **Overly Complex**: Remove Celery/Redis for simple use cases
-4. **Windows Compatibility**: Ensure cross-platform compatibility
+### 1. Slide Dimensions
+- Use `presentation.slide_width` NOT `slide.slide_width`
+- Access via: `slide.part.package.presentation_part.presentation`
 
-## Recommended Approaches
-1. **For SVG Generation**: Use svgwrite or xml.etree instead of CairoSVG
-2. **For PPTX Conversion**: Extract elements with python-pptx and generate SVG
-3. **For Async Processing**: Use FastAPI BackgroundTasks instead of Celery
-4. **For Storage**: Keep Supabase integration but make it optional for testing
+### 2. MSO_VERTICAL_ANCHOR Values
+- Only use: TOP, MIDDLE, BOTTOM
+- Do NOT use: TOP_CENTERED, MIDDLE_CENTERED, BOTTOM_CENTERED (don't exist)
 
-## Implementation Priority
-1. Fix dependencies to make app runnable
-2. Implement basic PPTX to SVG conversion
-3. Extract text with accurate positioning
-4. Generate metadata for frontend
-5. Test with real PPTX files 
+### 3. Supabase Storage RLS
+- For development: Disable RLS on tables
+- Create buckets manually in Supabase Studio
+- Use public buckets for development
+
+### 4. LibreOffice on Windows
+- Path example: "C:/Program Files/LibreOffice/program/soffice.exe"
+- If not working, fallback to ElementTree SVG generation
+- Check stderr for debug info
+
+### 5. URL Validation
+- Always normalize Supabase URLs (add http:// if missing)
+- Use urllib.parse for URL normalization
+
+## Current State (as of last update)
+1. **Working**: Basic PPTX to SVG conversion with ElementTree fallback
+2. **Working**: Supabase storage integration
+3. **Working**: Job tracking and retry mechanism
+4. **Issue**: LibreOffice SVG generation not producing output on Windows
+5. **Fixed**: Slide dimensions access, MSO_VERTICAL_ANCHOR enums, URL validation
+
+## Development Workflow
+1. Run Supabase locally: `supabase start`
+2. Apply database schema: Run supabase_setup.sql in SQL Editor
+3. Create storage buckets manually in Supabase Studio
+4. Start API: `uvicorn main:app --reload`
+5. Test at http://localhost:8000/docs
+
+## Debugging Tips
+1. Check logs for detailed error messages
+2. Verify Supabase connection at /health/health endpoint
+3. Use fallback SVG generation if LibreOffice fails
+4. For RLS errors, check bucket/table policies in Supabase Studio
+5. For file not found errors, check the cleanup logic in process_pptx 
