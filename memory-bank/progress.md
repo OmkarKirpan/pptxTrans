@@ -49,7 +49,15 @@
 
 - **Core Types:** Defined in `types/index.ts` for `TranslationSession`, `ProcessedSlide`, `SlideShape`.
 
-- **Supabase Client Setup:** Client-side (`lib/supabase/client.ts`) and server-side (`lib/supabase/server.ts`) Supabase client initializers are in place.
+- **Supabase Client Setup:** Client-side (`lib/supabase/client.ts`) and server-side (`lib/supabase/server.ts`) Supabase client initializers are in place. Updated for Next.js 15 compatibility with async cookies() handling.
+
+- **User Profile Page (`app/dashboard/profile/page.tsx`):**
+    - Complete profile page with responsive layout and breadcrumb navigation
+    - **Profile Form (`components/dashboard/profile-form.tsx`):** Edit basic information (name, email) with form validation and Supabase Auth integration
+    - **Password Change Form (`components/dashboard/password-change-form.tsx`):** Secure password change with strength indicator, validation, and current password verification
+    - **Account Settings (`components/dashboard/account-settings.tsx`):** Account information display, notification preferences, and avatar management info
+    - Full integration with existing dashboard header navigation and authentication flow
+    - Toast notifications for user feedback on form submissions
 
 ## 2. What's Left to Build / Key Pending Areas
 
@@ -81,7 +89,7 @@
 
 - **Share Page/Functionality:** UI and logic for generating and managing shareable links to translation sessions (view-only or collaborative)
 
-- **User Profile & Settings Pages:** Basic pages for users to manage their profile and application settings
+- **Additional Settings Pages:** Additional settings pages beyond the profile page (e.g., application preferences, advanced settings)
 
 - **Deployment and Operations:**
     - Set up proper deployment environment for the PPTX processor service

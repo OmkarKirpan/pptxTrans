@@ -3,8 +3,8 @@ import { cookies } from "next/headers"
 import type { Database } from "@/lib/database.types" // Assuming you'll generate types
 
 // Define a function to create a Supabase client for server-side operations
-export function createSupabaseServerClient() {
-  const cookieStore = cookies()
+export async function createSupabaseServerClient() {
+  const cookieStore = await cookies()
 
   return createServerClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -39,8 +39,8 @@ export function createSupabaseServerClient() {
 
 // Define a function to create a Supabase client for server-side admin operations
 // This uses the SERVICE_ROLE_KEY for elevated privileges. Use with caution.
-export function createSupabaseAdminClient() {
-  const cookieStore = cookies()
+export async function createSupabaseAdminClient() {
+  const cookieStore = await cookies()
   return createServerClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!, // Ensure this env var is set
