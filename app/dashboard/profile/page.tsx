@@ -7,8 +7,10 @@ import AccountSettings from "@/components/dashboard/account-settings"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Button } from "@/components/ui/button"
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/ui/breadcrumb"
-import { User, Settings, Lock } from "lucide-react"
+import { User, Settings, Lock, Cog } from "lucide-react"
+import Link from "next/link"
 
 export default async function ProfilePage() {
   const supabase = await createSupabaseServerClient()
@@ -102,12 +104,20 @@ export default async function ProfilePage() {
             {/* Account Settings */}
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Settings className="h-5 w-5" />
-                  Account Settings
+                <CardTitle className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Settings className="h-5 w-5" />
+                    Account Settings
+                  </div>
+                  <Button variant="outline" size="sm" asChild>
+                    <Link href="/dashboard/settings">
+                      <Cog className="mr-2 h-4 w-4" />
+                      App Settings
+                    </Link>
+                  </Button>
                 </CardTitle>
                 <CardDescription>
-                  Manage your account preferences and settings.
+                  View your account information and manage your privacy settings. For application preferences, translation settings, and notifications, visit the Settings page.
                 </CardDescription>
               </CardHeader>
               <CardContent>

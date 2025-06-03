@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { createClient } from "@/lib/supabase/client"
+import { ThemeToggle } from "@/components/theme-toggle"
 import { LogOut, PlusCircle, Settings, UserCircle, LayoutDashboard } from "lucide-react"
 import type { User } from "@supabase/supabase-js"
 
@@ -46,6 +47,7 @@ export default function DashboardHeader({ user }: DashboardHeaderProps) {
         <span>Translator Dashboard</span>
       </Link>
       <div className="flex items-center gap-4">
+        <ThemeToggle />
         <Button asChild>
           <Link href="/dashboard/new-session">
             <PlusCircle className="mr-2 h-5 w-5" />

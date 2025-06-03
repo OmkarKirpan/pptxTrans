@@ -55,9 +55,27 @@
     - Complete profile page with responsive layout and breadcrumb navigation
     - **Profile Form (`components/dashboard/profile-form.tsx`):** Edit basic information (name, email) with form validation and Supabase Auth integration
     - **Password Change Form (`components/dashboard/password-change-form.tsx`):** Secure password change with strength indicator, validation, and current password verification
-    - **Account Settings (`components/dashboard/account-settings.tsx`):** Account information display, notification preferences, and avatar management info
+    - **Account Settings (`components/dashboard/account-settings.tsx`):** Account information display and avatar management info (notifications moved to settings page)
     - Full integration with existing dashboard header navigation and authentication flow
     - Toast notifications for user feedback on form submissions
+    - Cross-navigation link to settings page for app preferences
+
+- **Settings Page (`app/dashboard/settings/page.tsx`):**
+    - Complete settings page following same layout pattern as profile page
+    - **Translation Preferences (`components/dashboard/translation-preferences.tsx`):** Default source/target languages, quality settings, auto-save preferences
+    - **Notification Settings (`components/dashboard/notification-settings.tsx`):** Email notifications, session updates, security alerts (moved from profile)
+    - **Application Preferences (`components/dashboard/application-preferences.tsx`):** Theme selection with live preview, interface language, compact mode, tooltips, animations
+    - All settings components include real-time save functionality with toast feedback
+    - Proper navigation integration through dashboard header dropdown menu
+    - Clean separation between personal profile info and application preferences
+
+- **Dark Mode Theme System:**
+    - **Theme Provider (`components/theme-provider.tsx`):** Wrapper for next-themes with proper configuration
+    - **Root Layout (`app/layout.tsx`):** Theme provider integration with suppressHydrationWarning
+    - **Theme Toggle (`components/theme-toggle.tsx`):** Quick theme switcher for testing and user convenience
+    - **Dashboard Header:** Integrated theme toggle for easy access
+    - **Application Preferences:** Real-time theme switching connected to next-themes
+    - Full dark/light/system theme support with proper CSS variables and Tailwind configuration
 
 ## 2. What's Left to Build / Key Pending Areas
 
@@ -89,7 +107,7 @@
 
 - **Share Page/Functionality:** UI and logic for generating and managing shareable links to translation sessions (view-only or collaborative)
 
-- **Additional Settings Pages:** Additional settings pages beyond the profile page (e.g., application preferences, advanced settings)
+- **Additional Settings Pages:** ✅ **COMPLETED** - Settings page implemented with translation preferences, notification settings, and application preferences
 
 - **Deployment and Operations:**
     - Set up proper deployment environment for the PPTX processor service
