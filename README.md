@@ -106,6 +106,7 @@ graph TD
 *   [Python](https://www.python.org/) (version 3.X - *Specify version*) & `pip`
 *   [LibreOffice](https://www.libreoffice.org/download/download-libreoffice/) installed and accessible in your PATH (for the `pptx-processor-service`).
 *   A [Supabase](https://supabase.com/) project.
+*   [Go](https://golang.org/) (version 1.21+) for the audit service.
 
 ### 1. Clone the Repository
 
@@ -121,6 +122,7 @@ cd pptxTrans
     ```env
     NEXT_PUBLIC_SUPABASE_URL=your-supabase-url
     NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
+    NEXT_PUBLIC_AUDIT_SERVICE_URL=http://localhost:4006
     # Add other environment variables as needed
     ```
 *   Install dependencies:
@@ -163,76 +165,76 @@ cd pptxTrans
     ```
     The processor service API should be accessible at `http://localhost:8000/docs`.
 
-### 4. Supabase Setup
+### 4. Audit Service Setup
+
+*   Navigate to the `audit-service` directory:
+    ```bash
+    cd audit-service
+    ```
+*   Create a `.env` file by copying `.env.example`:
+    ```bash
+    cp .env.example .env
+    ```
+*   Update the `.env` file with your Supabase details:
+    ```env
+    PORT=4006
+    LOG_LEVEL=debug
+    SUPABASE_URL=your-supabase-url
+    SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
+    SUPABASE_JWT_SECRET=your-supabase-jwt-secret
+    CORS_ORIGIN=http://localhost:3000
+    ```
+*   Run the service:
+    ```bash
+    make run
+    ```
+    The audit service should be accessible at `http://localhost:4006/health`.
+
+### 5. Supabase Setup
 
 *   Ensure your Supabase project has the necessary tables created. Refer to `memory-bank/systemPatterns.md` for details on `translation_sessions`, `slides`, and `slide_shapes` tables.
 *   Set up Row Level Security (RLS) policies as described in the project documentation.
 *   Configure Supabase Storage buckets (e.g., `presentations`, `slide_visuals`).
 
+## 🔐 Environment Variables
+
+### Frontend (Next.js) Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `NEXT_PUBLIC_SUPABASE_URL` | Your Supabase project URL | - |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Your Supabase anonymous key | - |
+| `NEXT_PUBLIC_AUDIT_SERVICE_URL` | URL of the audit service | http://localhost:4006 |
+
+### PPTX Processor Service Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `API_ENV` | Environment (development, production) | development |
+| `API_PORT` | Port for the FastAPI server | 8000 |
+| `SUPABASE_URL` | Your Supabase project URL | - |
+| `SUPABASE_KEY` | Your Supabase service role key | - |
+| `TEMP_UPLOAD_DIR` | Directory for temporary uploads | ./tmp/uploads |
+| `TEMP_PROCESSING_DIR` | Directory for processing files | ./tmp/processing |
+| `LIBREOFFICE_PATH` | Path to LibreOffice executable | - |
+
+### Audit Service Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PORT` | Port for the audit service | 4006 |
+| `LOG_LEVEL` | Logging level (debug, info, warn, error) | info |
+| `SUPABASE_URL` | Your Supabase project URL | - |
+| `SUPABASE_SERVICE_ROLE_KEY` | Your Supabase service role key | - |
+| `SUPABASE_JWT_SECRET` | Your Supabase JWT secret | - |
+| `CORS_ORIGIN` | CORS allowed origin | http://localhost:3000 |
+| `HTTP_TIMEOUT` | HTTP client timeout | 30s |
+| `HTTP_MAX_IDLE_CONNS` | Maximum idle connections | 100 |
+| `HTTP_MAX_CONNS_PER_HOST` | Maximum connections per host | 10 |
+| `CACHE_JWT_TTL` | JWT cache TTL | 5m |
+| `CACHE_SHARE_TOKEN_TTL` | Share token cache TTL | 1m |
+| `CACHE_CLEANUP_INTERVAL` | Cache cleanup interval | 10m |
+
 ## 📈 Project Status & Progress
 
-(Refer to `memory-bank/progress.md` for the latest detailed progress.)
-
-### What Works:
-*   ✅ User Authentication (Login, Signup)
-*   ✅ PPTX Processor Service (Standalone FastAPI service with LibreOffice SVG conversion, text extraction, Supabase integration)
-*   ✅ Core Database Schema in Supabase
-*   ✅ Basic Dashboard UI (fetching sessions)
-*   ✅ New Session Upload Wizard UI (mock uploads)
-*   ✅ Slide Editor:
-    *   SVG background rendering.
-    *   Interactive text overlays based on coordinates (mock data).
-    *   Basic text editing dialog.
-
-### Key Pending Areas:
-*   ⏳ **Full Frontend-Processor Service Integration:** Connect `UploadWizard` to the service, handle processing status.
-*   ⏳ **Slide Editor Enhancements:** Real data fetching, `SlideNavigator` with actual SVGs, improved text editing.
-*   ⏳ **Collaboration Features:** Comments implementation.
-*   ⏳ **Export Functionality:** PPTX reconstruction.
-*   ⏳ UI Polish, error handling, and responsiveness.
-
-## 🗺️ Project Structure
-
-```
-pptxTrans/
-├── app/                     # Next.js App Router (Frontend)
-│   ├── (auth)/              # Authentication pages (login, signup)
-│   ├── (dashboard)/         # User dashboard, new session creation
-│   ├── (editor)/            # Slide editor interface
-│   ├── api/                 # Next.js API routes (if any, distinct from processor service)
-│   └── layout.tsx           # Main app layout
-├── components/              # Shared React components
-│   ├── dashboard/
-│   ├── editor/
-│   └── ui/                  # shadcn/ui components
-├── hooks/                   # Custom React hooks
-├── lib/                     # Utility functions, Supabase client setup
-│   └── supabase/
-├── memory-bank/             # Project documentation and context files (for Cursor AI)
-├── pptx-processor-service/  # Python FastAPI backend for PPTX processing
-│   ├── app/                 # FastAPI application code
-│   │   ├── api/             # API endpoints
-│   │   ├── core/            # Configuration, core logic
-│   │   ├── models/          # Pydantic models
-│   │   └── services/        # Business logic for processing
-│   ├── .venv/               # Python virtual environment
-│   ├── main.py              # FastAPI app entry point
-│   └── requirements.txt     # Python dependencies
-├── public/                  # Static assets for Next.js
-├── styles/                  # Global styles
-├── types/                   # TypeScript type definitions
-├── .cursorrules             # Cursor AI project intelligence
-├── .env.example             # Example environment variables
-├── next.config.mjs          # Next.js configuration
-├── package.json
-├── tsconfig.json
-└── README.md                # This file!
-```
-
-##🤝 Contributing
-
-Details on contributing to this project will be added soon. (Placeholder)
-
-##📜 License
-
-This project is licensed under the [MIT License](LICENSE). (Placeholder - create a LICENSE file if needed) 
+(Refer to `
