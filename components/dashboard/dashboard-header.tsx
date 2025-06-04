@@ -14,8 +14,9 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { createClient } from "@/lib/supabase/client"
 import { ThemeToggle } from "@/components/theme-toggle"
-import { LogOut, PlusCircle, Settings, UserCircle, LayoutDashboard } from "lucide-react"
+import { LogOut, PlusCircle, Settings, UserCircle, LayoutDashboard, Bell } from "lucide-react"
 import type { User } from "@supabase/supabase-js"
+import { useNotifications } from "@/lib/store"
 
 interface DashboardHeaderProps {
   user: User | null
@@ -24,6 +25,7 @@ interface DashboardHeaderProps {
 export default function DashboardHeader({ user }: DashboardHeaderProps) {
   const router = useRouter()
   const supabase = createClient()
+  const { unreadCount } = useNotifications()
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -48,6 +50,17 @@ export default function DashboardHeader({ user }: DashboardHeaderProps) {
       </Link>
       <div className="flex items-center gap-4">
         <ThemeToggle />
+        
+        {/* Notifications Button */}
+        <Button variant="ghost" className="relative" onClick={() => router.push("/dashboard/notifications")}>
+          <Bell className="h-5 w-5" />
+          {unreadCount > 0 && (
+            <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-xs font-bold text-destructive-foreground">
+              {unreadCount > 99 ? '99+' : unreadCount}
+            </span>
+          )}
+        </Button>
+        
         <Button asChild>
           <Link href="/dashboard/new-session">
             <PlusCircle className="mr-2 h-5 w-5" />

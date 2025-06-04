@@ -17,6 +17,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogC
 import { Label } from "@/components/ui/label"
 import { useAuditLog } from "@/hooks/useAuditLog" // Import audit log hook
 
+// Import Zustand hooks
+import { useSession, useSlides, useEditBuffers } from "@/lib/store"
+
 // MOCK DATA using ProcessedSlide and new SlideShape structure
 const MOCK_PROCESSED_SLIDES: ProcessedSlide[] = [
   {
@@ -111,13 +114,6 @@ const MOCK_PROCESSED_SLIDES: ProcessedSlide[] = [
   },
 ]
 
-interface TextEditorState {
-  isOpen: boolean
-  shapeId: string | null
-  originalText: string
-  currentTranslation: string
-}
-
 export default function SlideEditorPage() {
   const params = useParams()
   const router = useRouter()
@@ -128,23 +124,46 @@ export default function SlideEditorPage() {
   // Initialize audit logging
   const { createAuditEvent } = useAuditLog(sessionId)
 
-  const [user, setUser] = useState<User | null>(null)
-  const [session, setSession] = useState<TranslationSession | null>(null)
-  const [slides, setSlides] = useState<ProcessedSlide[]>(MOCK_PROCESSED_SLIDES)
-  const [currentSlide, setCurrentSlide] = useState<ProcessedSlide | null>(MOCK_PROCESSED_SLIDES[0] || null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  // Use Zustand store hooks
+  const {
+    currentSession,
+    setSession,
+    setLoading: setSessionLoading,
+    isLoading: isSessionLoading,
+    error: sessionError,
+    setError: setSessionError
+  } = useSession()
+  
+  const {
+    slides,
+    currentSlideId,
+    currentSlide,
+    setSlides,
+    setCurrentSlide,
+    updateSlideShapes,
+    slidesLoading,
+    setSlidesLoading,
+    slidesError,
+    setSlidesError
+  } = useSlides()
+  
+  const {
+    activeBufferId,
+    activeBuffer,
+    createBuffer,
+    updateBuffer,
+    saveBuffer,
+    setActiveBuffer
+  } = useEditBuffers()
 
-  const [textEditor, setTextEditor] = useState<TextEditorState>({
-    isOpen: false,
-    shapeId: null,
-    originalText: "",
-    currentTranslation: "",
-  })
+  // Store for user data (not in Zustand yet)
+  const [user, setUser] = useState<User | null>(null)
 
   useEffect(() => {
     const fetchData = async () => {
-      setLoading(true)
+      setSessionLoading(true)
+      setSlidesLoading(true)
+      
       const {
         data: { user: authUser },
         error: authError,
@@ -172,11 +191,14 @@ export default function SlideEditorPage() {
       }
 
       if (!mockSessionData) {
-        setError("Failed to load session details.")
+        setSessionError("Failed to load session details.")
       } else {
-        setSession(mockSessionData)
-        setSlides(MOCK_PROCESSED_SLIDES) // Using mock slides
-        setCurrentSlide(MOCK_PROCESSED_SLIDES[0] || null)
+        // Update Zustand store
+        setSession(mockSessionData, 'owner')
+        setSlides(MOCK_PROCESSED_SLIDES)
+        if (MOCK_PROCESSED_SLIDES.length > 0) {
+          setCurrentSlide(MOCK_PROCESSED_SLIDES[0].id)
+        }
         
         // Log view event
         createAuditEvent('view', { initialSlide: MOCK_PROCESSED_SLIDES[0]?.slide_number || 1 })
@@ -187,18 +209,21 @@ export default function SlideEditorPage() {
           action: 'editor_opened'
         })
       }
-      setLoading(false)
+      
+      setSessionLoading(false)
+      setSlidesLoading(false)
     }
+    
     if (sessionId) {
       fetchData()
     }
-  }, [sessionId, supabase, router, createAuditEvent])
+  }, [sessionId, supabase, router, createAuditEvent, setSession, setSlides, setCurrentSlide, setSessionLoading, setSlidesLoading, setSessionError])
 
   const handleSelectSlide = (slideId: string) => {
-    const selected = slides.find((s) => s.id === slideId)
-    setCurrentSlide(selected || null)
+    setCurrentSlide(slideId)
     
     // Log slide selection
+    const selected = slides.find((s) => s.id === slideId)
     if (selected) {
       createAuditEvent('view', { slideNumber: selected.slide_number })
     }
@@ -210,12 +235,8 @@ export default function SlideEditorPage() {
     currentTranslation?: string,
     shapeData?: any
   ) => {
-    setTextEditor({
-      isOpen: true,
-      shapeId,
-      originalText,
-      currentTranslation: currentTranslation || "",
-    })
+    // Create or update buffer
+    createBuffer(shapeId, currentSlide?.id || '', originalText, currentTranslation)
     
     // Log text selection event with enhanced data
     createAuditEvent('view', {
@@ -228,33 +249,36 @@ export default function SlideEditorPage() {
   }
 
   const handleSaveTranslation = async () => {
-    if (!currentSlide || !textEditor.shapeId) return
+    if (!currentSlide || !activeBufferId || !activeBuffer) return
 
     try {
-      // Optimistic update
-      const newSlides = slides.map((s) => {
-        if (s.id === currentSlide.id) {
-          return {
-            ...s,
-            shapes: s.shapes.map((sh) => {
-              if (sh.id === textEditor.shapeId) {
-                return { ...sh, translated_text: textEditor.currentTranslation }
-              }
-              return sh
-            }),
-          }
-        }
-        return s
-      })
-
-      setSlides(newSlides)
-      setCurrentSlide(newSlides.find((s) => s.id === currentSlide.id) || null)
-      setTextEditor({ ...textEditor, isOpen: false })
+      // Find the shape in the current slide
+      const shape = currentSlide.shapes.find(sh => sh.id === activeBufferId)
+      if (!shape) return
+      
+      // Create new shape with updated translation
+      const updatedShape = {
+        ...shape,
+        translated_text: activeBuffer.translatedText
+      }
+      
+      // Update slide shapes in the store
+      const updatedShapes = currentSlide.shapes.map(sh => 
+        sh.id === activeBufferId ? updatedShape : sh
+      )
+      
+      updateSlideShapes(currentSlide.id, updatedShapes)
+      
+      // Save buffer (marks as not dirty)
+      saveBuffer(activeBufferId)
+      
+      // Close editor
+      setActiveBuffer(null)
 
       // Log translation save
       createAuditEvent('edit', {
         action: 'save_translation',
-        shapeId: textEditor.shapeId,
+        shapeId: activeBufferId,
         slideNumber: currentSlide.slide_number
       })
     } catch (error) {
@@ -278,7 +302,12 @@ export default function SlideEditorPage() {
     }
   }
 
-  if (loading) {
+  // Handle dialog close
+  const handleCloseDialog = () => {
+    setActiveBuffer(null)
+  }
+
+  if (isSessionLoading || slidesLoading) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -287,11 +316,11 @@ export default function SlideEditorPage() {
     )
   }
 
-  if (error) {
+  if (sessionError || slidesError) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center">
         <AlertTriangle className="h-12 w-12 text-destructive" />
-        <p className="mt-4 text-xl text-destructive">{error}</p>
+        <p className="mt-4 text-xl text-destructive">{sessionError || slidesError}</p>
         <Button className="mt-4" onClick={() => router.push("/dashboard")}>
           Return to Dashboard
         </Button>
@@ -299,7 +328,7 @@ export default function SlideEditorPage() {
     )
   }
 
-  if (!session || !currentSlide) {
+  if (!currentSession || !currentSlide) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center">
         <AlertTriangle className="h-12 w-12 text-warning" />
@@ -322,7 +351,7 @@ export default function SlideEditorPage() {
         <div className="w-64 flex-none overflow-y-auto border-r bg-muted/30 p-4">
           <SlideNavigator
             slides={slides}
-            currentSlideId={currentSlide.id}
+            currentSlideId={currentSlideId}
             onSelectSlide={handleSelectSlide}
           />
         </div>
@@ -332,17 +361,19 @@ export default function SlideEditorPage() {
           <SlideCanvas
             slide={currentSlide}
             onTextClick={handleTextClick}
+            editable={true}
+            showReadingOrder={false}
           />
         </div>
 
         {/* Right sidebar - Comments Panel */}
         <div className="w-80 flex-none overflow-y-auto border-l bg-muted/30 p-4">
-          <CommentsPanel slideId={currentSlide.id} />
+          <CommentsPanel />
         </div>
       </div>
 
       {/* Text Editing Dialog */}
-      <Dialog open={textEditor.isOpen} onOpenChange={(open) => setTextEditor({ ...textEditor, isOpen: open })}>
+      <Dialog open={!!activeBufferId} onOpenChange={open => !open && handleCloseDialog()}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Edit Translation</DialogTitle>
@@ -350,14 +381,14 @@ export default function SlideEditorPage() {
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
               <Label htmlFor="original-text">Original Text</Label>
-              <div className="rounded-md bg-muted p-3 text-sm">{textEditor.originalText}</div>
+              <div className="rounded-md bg-muted p-3 text-sm">{activeBuffer?.originalText}</div>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="translated-text">Translation</Label>
               <Textarea
                 id="translated-text"
-                value={textEditor.currentTranslation}
-                onChange={(e) => setTextEditor({ ...textEditor, currentTranslation: e.target.value })}
+                value={activeBuffer?.translatedText || ''}
+                onChange={(e) => activeBufferId && updateBuffer(activeBufferId, e.target.value)}
                 placeholder="Enter translation here..."
                 rows={5}
               />

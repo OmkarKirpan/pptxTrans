@@ -1,26 +1,62 @@
 # Active Context: PowerPoint Translator App
 
 ## 1. Current Work Focus
-The primary focus is on implementing a full-stack solution for high-fidelity slide rendering and translation, with three main components:
+The primary focus is shifting to enhancing and integrating the completed Zustand state management system, alongside the ongoing work on the full-stack solution for high-fidelity slide rendering and translation:
 
-1. **PPTX Processor Service:** A Python FastAPI microservice for server-side PPTX processing
+1. **Frontend State Management (COMPLETED - INTEGRATION IN PROGRESS):**
+   - Implemented Zustand for centralized state management
+   - Created modular store slices for different state domains:
+     - SessionState: Managing current session, user role, share tokens
+     - SlidesState: Managing slides array, current slide, and reordering functionality
+     - EditBuffersState: Managing text edit buffers for unsaved changes
+     - CommentsState: Managing comments per shape (for future implementation)
+     - NotificationsState: Managing comment notifications and unread counts
+     - MergeState: Managing shape selection for merge operations
+   - Created main store file combining all slices
+   - Implemented custom hooks for accessing store state
+   - Started component integration with editor page, slide navigator, comments panel
+
+2. **PPTX Processor Service:** A Python FastAPI microservice for server-side PPTX processing
    - Converting slides to SVGs using LibreOffice with ElementTree fallback
    - Extracting text elements and their coordinates
    - Storing processed data in Supabase
    - Maintaining robust job status tracking and error handling
 
-2. **Audit Service:** A Go microservice for audit logging and history tracking
+3. **Audit Service:** A Go microservice for audit logging and history tracking
    - Providing read-only access to session audit logs
    - Supporting JWT and share token authentication
    - Implementing pagination and filtering for audit data
    - Ensuring secure access control based on user permissions
 
-3. **Frontend Slide Editor:** Refining the slide rendering and text editing interface
+4. **Frontend Slide Editor:** Refining the slide rendering and text editing interface
    - Displaying SVG backgrounds with interactive HTML overlays for text editing
    - Implementing the complete data flow from upload to editing
    - Integrating with the Audit Service for activity tracking
 
 ## 2. Recent Changes & Accomplishments
+- **Frontend State Management Implementation (COMPLETED):**
+  - Installed Zustand as the state management library
+  - Created comprehensive type definitions in `lib/store/types.ts`:
+    - Defined interfaces for all state slices (SessionState, SlidesState, EditBuffersState, etc.)
+    - Created types for EditBuffer, Comment, CommentNotification, SlideReorderState, MergeSelection
+    - Established UserRole type (owner, reviewer, viewer)
+  - Implemented all store slices:
+    - `session-slice.ts`: Managing session state and user roles
+    - `slides-slice.ts`: Managing slides, current slide, and reordering functionality
+    - `edit-buffers-slice.ts`: Managing text edit buffers for tracking unsaved changes
+    - `comments-slice.ts`: Managing comments per shape with loading states
+    - `notifications-slice.ts`: Managing notifications and unread counts
+    - `merge-slice.ts`: Managing shape selection for merge operations
+  - Created main store file `index.ts` that combines all slices
+  - Implemented custom hooks for accessing specific parts of the store
+  - Added devtools middleware for better debugging
+  - Created README.md documenting the store implementation
+  - Updated key components to use the store:
+    - Editor page to use session, slides, and edit buffers state
+    - Slide navigator to work with ProcessedSlide type
+    - Comments panel to use store for comments
+    - Dashboard header to display notifications from store
+
 - **PPTX Processor Service Implementation:**
   - Created a standalone Python FastAPI service with endpoints for PPTX processing
   - Implemented `/v1/process` endpoint for handling PPTX uploads and conversion
@@ -46,7 +82,7 @@ The primary focus is on implementing a full-stack solution for high-fidelity sli
   - Fixed API format compatibility issue by updating field names from 'action' to 'type' across the entire codebase
   - Enhanced error handling for service unavailability with specific error messages and graceful degradation
   - Updated documentation for test session ID pattern and environment configuration
-  - **Frontend Integration:** (NEW)
+  - **Frontend Integration:**
     - Integrated the `useAuditLog` hook into the editor page for user actions
     - Enhanced `SlideCanvas` component to pass detailed shape data for better audit logging
     - Implemented audit logging for key user actions (viewing, editing, navigation)
@@ -71,37 +107,73 @@ The primary focus is on implementing a full-stack solution for high-fidelity sli
   - Added proper navigation integration through dashboard header
 
 ## 3. Next Immediate Steps
-1. **Resolve LibreOffice SVG Generation Issues on Windows:**
+1. **Implement Store Persistence:**
+   - Add `zustand/middleware/persist` to enable offline support
+   - Configure persistence for critical slices (session, slides, edit buffers)
+   - Implement custom storage adapters for different environments
+   - Add migration strategies for handling state schema changes
+
+2. **Complete Component Integration:**
+   - Update `UploadWizard` to use session and slides slices
+   - Update dashboard components to use session state
+   - Implement a more robust text editing interface using edit buffers state
+   - Update all remaining components still using local state
+
+3. **Add Real-time Synchronization:**
+   - Integrate Supabase real-time subscriptions with the store
+   - Implement optimistic updates with server validation
+   - Add conflict resolution for concurrent edits
+   - Implement queue system for offline changes
+
+4. **Resolve LibreOffice SVG Generation Issues on Windows:**
    - Debug the LibreOffice command-line arguments for better output
    - Test different LibreOffice versions or configurations
    - Consider alternative solutions if needed
 
-2. **Connect Frontend to PPTX Processor Service:**
+5. **Connect Frontend to PPTX Processor Service:**
    - Update the `UploadWizard` to send uploaded PPTX files to the processor service
    - Implement polling mechanism to track processing status
    - Display processing progress to users
 
-3. **Complete Audit Logging Integration in Frontend:**
+6. **Complete Audit Logging Integration in Frontend:**
    - Add audit logging for dashboard actions (sharing, export, deletion)
    - Implement audit logging for batch operations
    - Test the complete audit flow from frontend to backend
 
-4. **Refine Slide Editor Data Flow:**
-   - Update `SlideNavigator` to use actual SVGs from processed slides
-   - Implement proper data fetching from Supabase in `editor/[sessionId]/page.tsx`
-   - Enhance text editing dialog with additional features (font size, basic formatting)
+7. **Enhance Error Handling:**
+   - Add error states to all slices for granular error management
+   - Implement retry mechanisms for failed operations
+   - Create error boundary components that leverage store error states
+   - Add toast notifications for error feedback using store state
 
-5. **Environment Configuration:**
-   - Setup proper deployment environment for both microservices
-   - Configure integration between Next.js frontend and backend services
-   - Implement proper service discovery and API gateway if needed
-
-6. **Translation Session Management:**
-   - Implement complete session lifecycle from creation to export
-   - Add functionality to track translation progress
-   - Integrate audit logging for session activities
+8. **Add Devtools and Debugging Support:**
+   - Fully integrate Zustand devtools middleware for all slices
+   - Add logging middleware for important state changes
+   - Create a debug panel component for development
+   - Implement time-travel debugging for the editor
 
 ## 4. Active Decisions & Considerations
+- **State Management Architecture:** The Zustand implementation provides:
+  - Lightweight and performant state management without boilerplate
+  - TypeScript-first approach with excellent type inference
+  - Easy integration with React components via hooks
+  - Modular slice-based architecture for maintainability
+  - Built-in devtools support for debugging
+  - Persistence capabilities for offline support (future enhancement)
+
+- **Store Structure:** The modular slice approach allows:
+  - Clear separation of concerns between different state domains
+  - Easy testing of individual slices
+  - Scalability as new features are added
+  - Prevention of large, monolithic state objects
+  - Selective subscriptions for performance optimization
+
+- **Persistence Strategy:** For offline support, planning to:
+  - Use localStorage for web and AsyncStorage for mobile
+  - Implement custom serialization/deserialization for complex objects
+  - Add version control for handling schema changes
+  - Selectively persist only necessary state to avoid performance issues
+
 - **Architecture Choice:** The decision to use separate microservices for PPTX processing and audit logging is confirmed as the right approach. This provides better separation of concerns, scalability, and language-specific optimizations.
 
 - **Processing Pipeline:** The current pipeline uses a hybrid approach:
@@ -126,6 +198,7 @@ The primary focus is on implementing a full-stack solution for high-fidelity sli
   - Consistent error response formats
   - Detailed logging with request IDs for traceability
   - Graceful degradation and fallback mechanisms
+  - Store error states for UI feedback
 
 - **Performance Considerations:** 
   - Monitor SVG rendering performance, especially for complex slides
@@ -133,6 +206,8 @@ The primary focus is on implementing a full-stack solution for high-fidelity sli
   - Implement proper cleanup of temporary files in the processor service
   - Use connection pooling and caching in the Audit Service
   - Consider adding pagination controls to all list views
+  - Zustand store should implement selective subscriptions to prevent unnecessary re-renders
+  - Monitor store size and serialization performance for persistence
 
 - **Deployment Strategy:**
   - Containerize all microservices for consistent deployment
@@ -142,7 +217,9 @@ The primary focus is on implementing a full-stack solution for high-fidelity sli
 
 - **UI Consistency:** The recently implemented profile and settings pages maintain consistent UI patterns with the rest of the application, ensuring a seamless user experience.
 
-- **Feature Prioritization:** (NEW)
+- **Feature Prioritization:**
   - Focus on the core PPTX translation functionality first
-  - Comments System will be implemented in a future phase
+  - Comments System will be implemented in a future phase (store structure is prepared)
   - Prioritize audit logging for critical user actions (editing, exporting, sharing)
+  - Complete state management integration before adding new features
+  - Add persistence and offline support as secondary priority

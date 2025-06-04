@@ -48,8 +48,8 @@ export default function SlideCanvas({ slide, editable, onTextClick, showReadingO
         <Image
           src={slide.svg_url || "/placeholder.svg"}
           alt={`Slide ${slide.slide_number}`}
-          layout="fill"
-          objectFit="contain" // 'contain' ensures the whole SVG is visible within the aspect ratio
+          fill
+          className="object-contain" // 'contain' ensures the whole SVG is visible within the aspect ratio
           priority // Prioritize loading current slide image
         />
 

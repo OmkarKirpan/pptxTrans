@@ -1,12 +1,12 @@
 "use client"
-import type { Slide } from "@/types"
+import type { ProcessedSlide } from "@/types"
 import { Card, CardContent } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import Image from "next/image"
 import { cn } from "@/lib/utils"
 
 interface SlideNavigatorProps {
-  slides: Slide[]
+  slides: ProcessedSlide[]
   currentSlideId: string | null
   onSelectSlide: (slideId: string) => void
 }
@@ -25,7 +25,7 @@ export default function SlideNavigator({ slides, currentSlideId, onSelectSlide }
     <Card className="h-full overflow-hidden">
       <ScrollArea className="h-full">
         <div className="p-2 space-y-2">
-          {slides.map((slide, index) => (
+          {slides.map((slide) => (
             <button
               key={slide.id}
               onClick={() => onSelectSlide(slide.id)}
@@ -35,11 +35,11 @@ export default function SlideNavigator({ slides, currentSlideId, onSelectSlide }
               )}
             >
               <div className="flex items-center space-x-2">
-                <span className="text-xs font-medium text-muted-foreground w-6 text-center">{index + 1}</span>
+                <span className="text-xs font-medium text-muted-foreground w-6 text-center">{slide.slide_number}</span>
                 <div className="aspect-video w-full flex-1 bg-muted rounded-sm overflow-hidden">
                   <Image
-                    src={slide.thumbnail_url || `/placeholder.svg?width=160&height=90&query=Slide ${index + 1}`}
-                    alt={`Slide ${slide.number}`}
+                    src={slide.svg_url || `/placeholder.svg?width=160&height=90&query=Slide ${slide.slide_number}`}
+                    alt={`Slide ${slide.slide_number}`}
                     width={160}
                     height={90}
                     className="object-cover w-full h-full"
