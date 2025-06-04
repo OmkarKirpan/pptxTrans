@@ -1,0 +1,4728 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+.cursorrules
+.python-version
+app/__init__.py
+app/api/__init__.py
+app/api/routes/health.py
+app/api/routes/processing.py
+app/api/routes/status.py
+app/core/config.py
+app/main.py
+app/models/schemas.py
+app/services/job_status.py
+app/services/pptx_processor.py
+app/services/results_service.py
+app/services/supabase_service.py
+Dockerfile
+docs/integration-guide.md
+docs/openapi.yaml
+docs/PRD.md
+env.example
+fix-env-guide.md
+job_status/14522686-e370-45ff-bfba-5cf0b5b195e1.json
+job_status/565da0d4-e655-47dd-a03e-f05644e3fd53.json
+job_status/7089e0e2-d9a7-440b-ba7a-abe219fe477c.json
+job_status/af5c6527-852f-4028-b5a9-29b635ed9b2b.json
+job_status/fab1af29-fa68-43a1-8f53-ad8fee2d22d1.json
+key.txt
+main.py
+memory-bank/activeContext.md
+memory-bank/productContext.md
+memory-bank/progress.md
+memory-bank/projectbrief.md
+memory-bank/systemPatterns.md
+memory-bank/techContext.md
+pyproject.toml
+README.md
+requirements.txt
+STORAGE_SETUP.md
+supabase_setup.sql
+tests/conftest.py
+tests/unit/api/test_health.py
+tests/unit/services/test_supabase_service.py
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path=".python-version">
+3.12
+</file>
+
+<file path="app/__init__.py">
+
+</file>
+
+<file path="app/api/__init__.py">
+
+</file>
+
+<file path="app/api/routes/health.py">
+from fastapi import APIRouter, Depends
+import time
+import platform
+import psutil
+import os
+import logging
+from app.models.schemas import HealthCheckResponse, HealthStatus, ComponentHealth
+from app.core.config import get_settings
+from app.services.supabase_service import check_supabase_connection, validate_supabase_credentials
+from fastapi.responses import JSONResponse
+from fastapi import status
+
+# Track application start time
+START_TIME = time.time()
+
+router = APIRouter()
+
+
+@router.get("/health")
+async def health_check():
+    """
+    Get health check information.
+    """
+    try:
+        start_time = time.time()
+        psutil_available = False
+
+        # Get settings
+        settings = get_settings()
+
+        try:
+            import psutil
+            psutil_available = True
+        except ImportError:
+            pass
+
+        system_info = {}
+        if psutil_available:
+            cpu_percent = psutil.cpu_percent(interval=0.1)
+            memory_percent = psutil.virtual_memory().percent
+            disk_percent = psutil.disk_usage('/').percent
+            system_info = {
+                "status": "healthy",
+                "message": f"CPU: {cpu_percent}%, Memory: {memory_percent}%, Disk: {disk_percent}%"
+            }
+        else:
+            system_info = {
+                "status": "healthy",
+                "message": "System monitoring disabled (psutil not installed)"
+            }
+
+        # Check Supabase connection
+        supabase_healthy = False
+        supabase_message = "Failed to connect to Supabase"
+        supabase_error = None
+
+        try:
+            supabase_healthy = await check_supabase_connection()
+            if supabase_healthy:
+                supabase_message = "Connected to Supabase"
+            else:
+                # Try to get more specific error
+                try:
+                    await validate_supabase_credentials(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+                except Exception as e:
+                    supabase_error = str(e)
+        except Exception as e:
+            logging.error(
+                f"Supabase connection error: {str(e)}", exc_info=True)
+            supabase_error = str(e)
+            supabase_message = f"Error checking Supabase connection: {str(e)}"
+
+        # Check storage
+        storage_healthy = True
+        storage_message = "Storage directories accessible"
+        try:
+            for dir_path in [settings.TEMP_UPLOAD_DIR, settings.TEMP_PROCESSING_DIR]:
+                os.makedirs(dir_path, exist_ok=True)
+                if not os.path.exists(dir_path) or not os.access(dir_path, os.W_OK):
+                    storage_healthy = False
+                    storage_message = f"Cannot access directory: {dir_path}"
+                    break
+        except Exception as e:
+            logging.error(f"Storage error: {str(e)}", exc_info=True)
+            storage_healthy = False
+            storage_message = f"Storage error: {str(e)}"
+
+        response = {
+            "status": "healthy" if (supabase_healthy and storage_healthy) else "unhealthy",
+            "version": settings.PROJECT_VERSION,
+            "uptime": time.time() - start_time,
+            "components": {
+                "system": system_info,
+                "supabase": {
+                    "status": "healthy" if supabase_healthy else "unhealthy",
+                    "message": supabase_message,
+                    "error": supabase_error
+                },
+                "storage": {
+                    "status": "healthy" if storage_healthy else "unhealthy",
+                    "message": storage_message
+                }
+            }
+        }
+
+        if not supabase_healthy or not storage_healthy:
+            return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=response)
+        return response
+    except Exception as e:
+        import logging
+        logging.error(f"Health check error: {str(e)}", exc_info=True)
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"detail": f"Health check error: {str(e)}"}
+        )
+</file>
+
+<file path="app/api/routes/processing.py">
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks, Depends
+from fastapi.responses import JSONResponse
+from typing import List, Optional
+import uuid
+import os
+import shutil
+from datetime import datetime, timedelta
+
+from app.core.config import Settings, get_settings
+from app.models.schemas import ProcessingResponse, BatchProcessingResponse, BatchProcessingJob, ProcessingStatus
+from app.services.pptx_processor import queue_pptx_processing
+from app.services.supabase_service import validate_supabase_credentials
+
+router = APIRouter()
+
+
+@router.post("/process", status_code=202, response_model=ProcessingResponse)
+async def process_pptx(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    session_id: str = Form(...),
+    source_language: Optional[str] = Form(None),
+    target_language: Optional[str] = Form(None),
+    generate_thumbnails: bool = Form(True),
+    settings: Settings = Depends(get_settings)
+):
+    """
+    Process a PPTX file, converting slides to SVGs and extracting text data.
+
+    - **file**: The PPTX file to process
+    - **session_id**: Unique identifier for the translation session
+    - **source_language**: The source language of the presentation
+    - **target_language**: The target language for translation
+    - **generate_thumbnails**: Whether to generate slide thumbnails
+    """
+    # Validate file type
+    if file.content_type not in settings.SUPPORTED_FILE_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type: {file.content_type}. Only PPTX files are supported."
+        )
+
+    # Validate Supabase credentials
+    try:
+        await validate_supabase_credentials(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+    except Exception as e:
+        raise HTTPException(
+            status_code=401,
+            detail=f"Invalid Supabase credentials: {str(e)}"
+        )
+
+    # Generate a unique job ID
+    job_id = str(uuid.uuid4())
+
+    # Create a temporary file path
+    temp_dir = os.path.join(settings.TEMP_UPLOAD_DIR, job_id)
+    os.makedirs(temp_dir, exist_ok=True)
+    temp_file_path = os.path.join(temp_dir, file.filename)
+
+    # Save the uploaded file to the temporary location
+    with open(temp_file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    # Queue the processing task in the background
+    background_tasks.add_task(
+        queue_pptx_processing,
+        job_id=job_id,
+        session_id=session_id,
+        file_path=temp_file_path,
+        source_language=source_language,
+        target_language=target_language,
+        generate_thumbnails=generate_thumbnails
+    )
+
+    # Estimate completion time (very rough estimate)
+    estimated_completion_time = datetime.now() + timedelta(minutes=5)
+
+    return ProcessingResponse(
+        job_id=job_id,
+        session_id=session_id,
+        status=ProcessingStatus.QUEUED,
+        message="PPTX processing has been queued",
+        estimated_completion_time=estimated_completion_time
+    )
+
+
+@router.post("/process/batch", status_code=202, response_model=BatchProcessingResponse)
+async def process_batch_pptx(
+    background_tasks: BackgroundTasks,
+    files: List[UploadFile] = File(...),
+    batch_id: str = Form(...),
+    session_ids: List[str] = Form(...),
+    settings: Settings = Depends(get_settings)
+):
+    """
+    Process multiple PPTX files in a batch.
+
+    - **files**: The PPTX files to process
+    - **batch_id**: Unique identifier for the batch
+    - **session_ids**: Unique identifiers for each translation session
+    """
+    if len(files) != len(session_ids):
+        raise HTTPException(
+            status_code=400,
+            detail="Number of files must match number of session IDs"
+        )
+
+    # Validate Supabase credentials
+    try:
+        await validate_supabase_credentials(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+    except Exception as e:
+        raise HTTPException(
+            status_code=401,
+            detail=f"Invalid Supabase credentials: {str(e)}"
+        )
+
+    jobs = []
+
+    for idx, (file, session_id) in enumerate(zip(files, session_ids)):
+        # Validate file type
+        if file.content_type not in settings.SUPPORTED_FILE_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type for file {idx+1}: {file.content_type}. Only PPTX files are supported."
+            )
+
+        # Generate a unique job ID
+        job_id = str(uuid.uuid4())
+
+        # Create a temporary file path
+        temp_dir = os.path.join(settings.TEMP_UPLOAD_DIR, job_id)
+        os.makedirs(temp_dir, exist_ok=True)
+        temp_file_path = os.path.join(temp_dir, file.filename)
+
+        # Save the uploaded file to the temporary location
+        with open(temp_file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        # Queue the processing task in the background
+        background_tasks.add_task(
+            queue_pptx_processing,
+            job_id=job_id,
+            session_id=session_id,
+            file_path=temp_file_path,
+            generate_thumbnails=True
+        )
+
+        jobs.append(
+            BatchProcessingJob(
+                job_id=job_id,
+                session_id=session_id,
+                status=ProcessingStatus.QUEUED
+            )
+        )
+
+    return BatchProcessingResponse(
+        batch_id=batch_id,
+        jobs=jobs
+    )
+</file>
+
+<file path="app/api/routes/status.py">
+from fastapi import APIRouter, HTTPException, Path, Depends
+from uuid import UUID
+import logging
+
+from app.models.schemas import ProcessingStatusResponse, ProcessedPresentation
+from app.services.job_status import get_job_status
+from app.services.results_service import get_processing_results
+from app.services.pptx_processor import queue_pptx_processing, get_job_file_path
+from app.core.config import Settings, get_settings
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter()
+
+
+@router.get("/status/{job_id}", response_model=ProcessingStatusResponse)
+async def get_processing_status(
+    job_id: str = Path(..., description="ID of the processing job"),
+    settings: Settings = Depends(get_settings)
+):
+    """
+    Get the status of a processing job.
+
+    - **job_id**: The ID of the processing job to check
+    """
+    try:
+        status = await get_job_status(job_id)
+        if status is None:
+            raise HTTPException(
+                status_code=404, detail=f"Job {job_id} not found")
+        return status
+    except Exception as e:
+        logger.error(f"Error getting job status: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/results/{session_id}", response_model=ProcessedPresentation)
+async def get_results(
+    session_id: str = Path(..., description="ID of the translation session"),
+    settings: Settings = Depends(get_settings)
+):
+    """
+    Get the results of a completed processing job.
+
+    - **session_id**: The ID of the translation session
+    """
+    try:
+        results = await get_processing_results(session_id)
+        return results
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Results not found for session: {session_id}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error retrieving processing results: {str(e)}"
+        )
+
+
+@router.post("/retry/{job_id}", response_model=ProcessingStatusResponse)
+async def retry_failed_job(job_id: str, settings: Settings = Depends(get_settings)):
+    """
+    Retry a failed job.
+    """
+    try:
+        # Get current job status
+        status = await get_job_status(job_id)
+        if status is None:
+            raise HTTPException(
+                status_code=404, detail=f"Job {job_id} not found")
+
+        # Only allow retrying failed jobs
+        if status.status != "failed":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Can only retry failed jobs. Current status: {status.status}"
+            )
+
+        # Get the file path for the job
+        file_path = await get_job_file_path(job_id)
+        if not file_path:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Original file for job {job_id} not found or already cleaned up"
+            )
+
+        # Requeue the job for processing
+        await queue_pptx_processing(
+            job_id=job_id,
+            session_id=status.session_id,
+            file_path=file_path,
+            generate_thumbnails=True
+        )
+
+        # Return the updated status
+        new_status = await get_job_status(job_id)
+        return new_status
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrying job: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+</file>
+
+<file path="app/core/config.py">
+from functools import lru_cache
+from typing import List, Optional
+import os
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import computed_field, Field
+
+
+class Settings(BaseSettings):
+    """Application settings."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=True,
+        extra='ignore'
+    )
+
+    # Project info
+    PROJECT_NAME: str = "PPTX Processor Microservice"
+    PROJECT_DESCRIPTION: str = "Service for converting PowerPoint presentations to SVGs and extracting text data"
+    PROJECT_VERSION: str = "1.0.0"
+
+    # API Settings
+    ENVIRONMENT: str = "development"
+    API_HOST: str = "0.0.0.0"
+    API_PORT: int = 8000
+    LOG_LEVEL: str = "INFO"
+
+    # CORS
+
+    @computed_field(return_type=List[str])
+    @property
+    def ALLOWED_ORIGINS(self) -> List[str]:
+        """
+        Returns a list of allowed origins.
+        Parses the "ALLOWED_ORIGINS" environment variable (comma-separated string)
+        or defaults to ["http://localhost:3000"] if the env var is not set or is empty/whitespace.
+        """
+        env_val: Optional[str] = os.getenv("ALLOWED_ORIGINS")
+
+        origins_list: List[str] = []
+        if env_val is not None:
+            if env_val.strip():
+                origins_list = [origin.strip()
+                                for origin in env_val.split(',') if origin.strip()]
+
+        if not origins_list:
+            return ["http://localhost:3000"]
+        return origins_list
+
+    # Storage - Using relative paths for Windows compatibility
+    TEMP_UPLOAD_DIR: str = os.path.join(".", "tmp", "uploads")
+    TEMP_PROCESSING_DIR: str = os.path.join(".", "tmp", "processing")
+
+    # Supabase - REQUIRED for the service to function
+    SUPABASE_URL: str = Field(
+        "", description="Supabase project URL (e.g., https://yourproject.supabase.co)")
+    SUPABASE_KEY: str = Field(
+        "", description="Supabase service key with permissions for storage and database")
+    SUPABASE_STORAGE_BUCKET: str = Field(
+        "slide-visuals", description="Supabase Storage bucket name for storing processed assets")
+
+    # Processing settings
+    MAX_FILE_SIZE: int = 50 * 1024 * 1024  # 50 MB
+    SUPPORTED_FILE_TYPES: List[str] = [
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation"]
+    SVG_QUALITY: int = 90
+    GENERATE_THUMBNAILS: bool = True
+    THUMBNAIL_WIDTH: int = 250
+
+    TEMP_DIR: str = "/tmp/pptx_processor"  # Example default
+    LIBREOFFICE_PATH: Optional[str] = None
+
+    def validate_supabase_config(self) -> bool:
+        """
+        Validates that the required Supabase configuration is present.
+        Returns True if valid, False otherwise.
+        """
+        if not self.SUPABASE_URL or not self.SUPABASE_KEY:
+            return False
+
+        # Basic URL validation
+        if not self.SUPABASE_URL.startswith('http://') and not self.SUPABASE_URL.startswith('https://'):
+            # Auto-fix URLs missing protocol by assuming http://
+            self.SUPABASE_URL = 'http://' + self.SUPABASE_URL
+
+        return True
+
+
+@lru_cache()
+def get_settings() -> Settings:
+    """Return cached settings instance."""
+    return Settings()
+</file>
+
+<file path="app/main.py">
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+import os
+from dotenv import load_dotenv
+
+from app.api.routes import processing, status, health
+from app.core.config import Settings, get_settings
+
+# Load environment variables
+load_dotenv()
+
+
+def create_application() -> FastAPI:
+    """Create and configure the FastAPI application."""
+    settings = get_settings()
+    application = FastAPI(
+        title=settings.PROJECT_NAME,
+        description=settings.PROJECT_DESCRIPTION,
+        version=settings.PROJECT_VERSION,
+        docs_url="/docs" if settings.ENVIRONMENT != "production" else None,
+        redoc_url="/redoc" if settings.ENVIRONMENT != "production" else None,
+    )
+
+    # Configure CORS
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.ALLOWED_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # Include routers
+    application.include_router(
+        processing.router, prefix="/v1", tags=["processing"])
+    application.include_router(status.router, prefix="/v1", tags=["status"])
+    application.include_router(health.router, prefix="/v1", tags=["health"])
+
+    return application
+
+
+app = create_application()
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize application resources on startup."""
+    # Create temp directories if they don't exist
+    settings = get_settings()
+    os.makedirs(settings.TEMP_UPLOAD_DIR, exist_ok=True)
+    os.makedirs(settings.TEMP_PROCESSING_DIR, exist_ok=True)
+
+    # Validate Supabase configuration
+    if not settings.validate_supabase_config():
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(
+            "ERROR: Supabase credentials not configured. "
+            "Set SUPABASE_URL and SUPABASE_KEY in environment variables or .env file. "
+            "The service will not be able to store processed assets."
+        )
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Clean up resources on shutdown."""
+    # Any cleanup logic here
+    pass
+
+
+if __name__ == "__main__":
+    import uvicorn
+    settings = get_settings()
+    uvicorn.run(
+        "app.main:app",
+        host=settings.API_HOST,
+        port=settings.API_PORT,
+        reload=settings.ENVIRONMENT != "production",
+    )
+</file>
+
+<file path="app/models/schemas.py">
+from enum import Enum
+from typing import List, Optional, Dict, Any, Union
+from pydantic import BaseModel, Field, AnyUrl, validator
+from datetime import datetime
+import uuid
+
+
+class ShapeType(str, Enum):
+    """Type of shape in a slide."""
+    TEXT = "text"
+    IMAGE = "image"
+    TABLE_CELL = "table_cell"
+    CHART_TEXT = "chart_text"
+    SMARTART_TEXT = "smartart_text"
+
+
+class CoordinateUnit(str, Enum):
+    """Unit for shape coordinates."""
+    PERCENTAGE = "percentage"
+    PIXELS = "px"
+
+
+class ProcessingStatus(str, Enum):
+    """Status of a processing job."""
+    QUEUED = "queued"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class OverallProcessingStatus(str, Enum):
+    """Overall status of presentation processing."""
+    COMPLETED = "completed"
+    PARTIALLY_COMPLETED = "partially_completed"
+    FAILED = "failed"
+
+
+class HealthStatus(str, Enum):
+    """Health status of the service."""
+    HEALTHY = "healthy"
+    DEGRADED = "degraded"
+    UNHEALTHY = "unhealthy"
+
+
+class SlideShape(BaseModel):
+    """A text shape on a slide."""
+    shape_id: str = Field(..., description="Unique identifier for the shape")
+    shape_type: ShapeType = Field(..., description="Type of the shape")
+    original_text: Optional[str] = Field(None,
+                                         description="Original text content of the shape (if any)")
+    x_coordinate: float = Field(..., description="X coordinate of the shape")
+    y_coordinate: float = Field(..., description="Y coordinate of the shape")
+    width: float = Field(..., description="Width of the shape")
+    height: float = Field(..., description="Height of the shape")
+    coordinates_unit: CoordinateUnit = Field(...,
+                                             description="Unit of the coordinates")
+    font_size: Optional[float] = Field(
+        None, description="Font size of the text in points")
+    font_family: Optional[str] = Field(
+        None, description="Font family of the text")
+    font_weight: Optional[str] = Field(
+        None, description="Font weight of the text (normal, bold)")
+    font_style: Optional[str] = Field(
+        None, description="Font style of the text (normal, italic)")
+    color: Optional[str] = Field(
+        None, description="Color of the text in hex format (e.g., #RRGGBB)")
+    text_align: Optional[str] = Field(
+        None, description="Horizontal alignment of the text (e.g., LEFT, CENTER, RIGHT, JUSTIFY)")
+    vertical_anchor: Optional[str] = Field(
+        None, description="Vertical alignment of the text (e.g., TOP, MIDDLE, BOTTOM)")
+    line_spacing: Optional[float] = Field(
+        None, description="Line spacing of the text (e.g., 1.0 for single, 1.5 for 1.5 lines)")
+    image_content_type: Optional[str] = Field(
+        None, description="MIME type of the image (e.g., image/png, image/jpeg)")
+    image_base64: Optional[str] = Field(
+        None, description="Base64 encoded string of the image data")
+    reading_order: Optional[int] = Field(
+        None, description="Reading order of the text element (1-based)")
+    parent_id: Optional[str] = Field(
+        None, description="ID of the parent shape (for grouped elements)")
+
+    @validator("shape_id", pre=True, always=True)
+    def set_shape_id(cls, v):
+        """Set a UUID for shape_id if not provided."""
+        return v or str(uuid.uuid4())
+
+
+class ProcessedSlide(BaseModel):
+    """A processed slide with its SVG and text shapes."""
+    slide_id: str = Field(..., description="Unique identifier for the slide")
+    slide_number: int = Field(...,
+                              description="Slide number in the presentation (1-based)")
+    svg_url: AnyUrl = Field(...,
+                            description="URL to the SVG representation of the slide")
+    original_width: int = Field(...,
+                                description="Original width of the slide in pixels")
+    original_height: int = Field(...,
+                                 description="Original height of the slide in pixels")
+    thumbnail_url: Optional[AnyUrl] = Field(
+        None, description="URL to a thumbnail image of the slide")
+    shapes: List[SlideShape] = Field(
+        default_factory=list, description="Text shapes on the slide")
+
+    @validator("slide_id", pre=True, always=True)
+    def set_slide_id(cls, v):
+        """Set a UUID for slide_id if not provided."""
+        return v or str(uuid.uuid4())
+
+
+class ProcessedPresentation(BaseModel):
+    """A processed presentation with all its slides."""
+    session_id: str = Field(...,
+                            description="Unique identifier for the translation session")
+    slide_count: int = Field(...,
+                             description="Total number of slides in the presentation")
+    processing_status: OverallProcessingStatus = Field(
+        ..., description="Overall status of the processing")
+    processing_time: Optional[int] = Field(
+        None, description="Processing time in seconds")
+    slides: List[ProcessedSlide] = Field(
+        default_factory=list, description="Processed slides")
+
+
+class ProcessingResponse(BaseModel):
+    """Response after starting a processing job."""
+    job_id: str = Field(...,
+                        description="Unique identifier for the processing job")
+    session_id: str = Field(...,
+                            description="Unique identifier for the translation session")
+    status: ProcessingStatus = Field(...,
+                                     description="Current status of the processing job")
+    message: str = Field(..., description="Informational message")
+    estimated_completion_time: Optional[datetime] = Field(
+        None, description="Estimated time of completion")
+
+
+class BatchProcessingJob(BaseModel):
+    """Information about a job in a batch."""
+    job_id: str = Field(...,
+                        description="Unique identifier for the processing job")
+    session_id: str = Field(...,
+                            description="Unique identifier for the translation session")
+    status: ProcessingStatus = Field(...,
+                                     description="Current status of the processing job")
+
+
+class BatchProcessingResponse(BaseModel):
+    """Response after starting a batch processing job."""
+    batch_id: str = Field(..., description="Unique identifier for the batch")
+    jobs: List[BatchProcessingJob] = Field(...,
+                                           description="List of jobs in the batch")
+
+
+class ProcessingStatusResponse(BaseModel):
+    """Status of a processing job."""
+    job_id: str = Field(...,
+                        description="Unique identifier for the processing job")
+    session_id: str = Field(...,
+                            description="Unique identifier for the translation session")
+    status: ProcessingStatus = Field(...,
+                                     description="Current status of the processing job")
+    progress: int = Field(..., ge=0, le=100,
+                          description="Progress percentage of the processing job")
+    current_stage: Optional[str] = Field(
+        None, description="Current processing stage")
+    message: Optional[str] = Field(
+        None, description="Informational or error message")
+    completed_at: Optional[datetime] = Field(
+        None, description="Time when processing completed")
+    error: Optional[str] = Field(
+        None, description="Error details (if status is failed)")
+
+
+class ComponentHealth(BaseModel):
+    """Health status of a system component."""
+    status: HealthStatus = Field(...,
+                                 description="Health status of the component")
+    message: Optional[str] = Field(
+        None, description="Additional information about the component health")
+
+
+class HealthCheckResponse(BaseModel):
+    """Response from a health check."""
+    status: HealthStatus = Field(...,
+                                 description="Overall health status of the service")
+    version: str = Field(..., description="Version of the service")
+    uptime: Optional[float] = Field(
+        None, description="Service uptime in seconds")
+    components: Optional[Dict[str, ComponentHealth]] = Field(
+        None, description="Health status of individual components")
+
+
+class ErrorResponse(BaseModel):
+    """Standard error response."""
+    code: str = Field(..., description="Error code")
+    message: str = Field(..., description="Error message")
+    details: Optional[Dict[str, Any]] = Field(
+        None, description="Additional error details")
+</file>
+
+<file path="app/services/job_status.py">
+import os
+import json
+import logging
+from typing import Dict, Any
+import aiofiles
+from datetime import datetime
+
+from app.models.schemas import ProcessingStatusResponse
+
+# In-memory job status store (for demo purposes)
+# In a production environment, this would be stored in Redis or a similar service
+JOB_STATUS: Dict[str, ProcessingStatusResponse] = {}
+
+logger = logging.getLogger(__name__)
+
+
+async def update_job_status(job_id: str, status: ProcessingStatusResponse) -> None:
+    """
+    Update the status of a processing job.
+
+    In a production environment, this would be stored in Redis or a similar service.
+    For this implementation, we'll use an in-memory dictionary and file-based backup.
+    """
+    # Update in-memory store
+    JOB_STATUS[job_id] = status
+
+    # Persist to disk as a backup
+    try:
+        os.makedirs("./job_status", exist_ok=True)
+        status_file = f"./job_status/{job_id}.json"
+
+        async with aiofiles.open(status_file, "w") as f:
+            await f.write(status.json())
+
+    except Exception as e:
+        logger.error(f"Error persisting job status to disk: {str(e)}")
+
+
+async def get_job_status(job_id: str) -> ProcessingStatusResponse:
+    """
+    Get the status of a processing job.
+
+    Checks the in-memory store first, then falls back to the file-based backup.
+    """
+    # Check in-memory store
+    if job_id in JOB_STATUS:
+        return JOB_STATUS[job_id]
+
+    # Fall back to file-based backup
+    status_file = f"./job_status/{job_id}.json"
+
+    if not os.path.exists(status_file):
+        raise FileNotFoundError(f"Job status not found for job ID: {job_id}")
+
+    try:
+        async with aiofiles.open(status_file, "r") as f:
+            status_json = await f.read()
+            return ProcessingStatusResponse.parse_raw(status_json)
+
+    except Exception as e:
+        logger.error(f"Error reading job status from disk: {str(e)}")
+        raise Exception(f"Failed to read job status: {str(e)}")
+
+
+async def clear_job_status(job_id: str) -> None:
+    """
+    Clear the status of a processing job.
+
+    This is used for cleanup after a job is completed or failed.
+    """
+    # Remove from in-memory store
+    if job_id in JOB_STATUS:
+        del JOB_STATUS[job_id]
+
+    # Remove from disk
+    status_file = f"./job_status/{job_id}.json"
+
+    if os.path.exists(status_file):
+        try:
+            os.remove(status_file)
+        except Exception as e:
+            logger.error(f"Error removing job status file: {str(e)}")
+
+
+async def get_all_active_jobs() -> Dict[str, ProcessingStatusResponse]:
+    """
+    Get all active processing jobs.
+
+    This is useful for monitoring and management purposes.
+    """
+    # Return a copy of the in-memory store
+    return dict(JOB_STATUS)
+</file>
+
+<file path="app/services/pptx_processor.py">
+import os
+import uuid
+import logging
+import time
+import asyncio
+from typing import List, Dict, Any, Optional, Tuple
+from datetime import datetime
+from pptx import Presentation
+from PIL import Image
+from PIL import ImageDraw
+from PIL import ImageFont
+import json
+import shutil
+import xml.etree.ElementTree as ET
+from pptx.enum.text import PP_ALIGN, MSO_VERTICAL_ANCHOR
+from pptx.util import Emu, Pt
+import base64
+from pptx.enum.shapes import MSO_SHAPE_TYPE
+import subprocess
+import tempfile
+import glob
+
+from app.models.schemas import (
+    ProcessedSlide,
+    SlideShape,
+    ProcessedPresentation,
+    OverallProcessingStatus,
+    ShapeType,
+    CoordinateUnit,
+    ProcessingStatusResponse,
+    ProcessingStatus
+)
+from app.services.supabase_service import upload_file_to_supabase, update_job_status
+from app.services.job_status import update_job_status as update_local_job_status, get_job_status
+# Import get_settings instead of settings
+from app.core.config import get_settings
+
+logger = logging.getLogger(__name__)
+
+# Get settings
+settings = get_settings()
+
+# Removed hardcoded LIBREOFFICE_PATH, will use settings.LIBREOFFICE_PATH
+
+# Dictionary to keep track of job file paths for retry capability
+_job_file_paths = {}
+
+
+async def get_job_file_path(job_id: str) -> Optional[str]:
+    """
+    Get the file path for a job.
+    Returns None if the job doesn't exist or the file has been cleaned up.
+    """
+    # First check our in-memory cache
+    if job_id in _job_file_paths and os.path.exists(_job_file_paths[job_id]):
+        return _job_file_paths[job_id]
+
+    # If not in memory, we can't retrieve it since we don't persistently store file paths
+    return None
+
+
+async def _generate_svgs_for_all_slides_libreoffice(
+    presentation_path: str,
+    output_dir: str,  # This will be the directory where final slide_N.svg files are stored
+    slide_count: int
+) -> Dict[int, str]:
+    """
+    Convert each slide from a presentation to an individual SVG file using LibreOffice.
+    Iterates through slides and calls LibreOffice for each one.
+    """
+    if not settings.LIBREOFFICE_PATH or not os.path.exists(settings.LIBREOFFICE_PATH):
+        logger.warning(
+            "LibreOffice path not configured or invalid. Skipping LibreOffice SVG generation.")
+        return {}
+
+    abs_presentation_path = os.path.abspath(presentation_path)
+    if not os.path.exists(abs_presentation_path):
+        logger.error(
+            f"Absolute presentation path not found: {abs_presentation_path}")
+        return {}
+
+    # Temporary directory for LibreOffice to write individual SVG outputs before renaming/moving
+    # This main temp dir will contain uniquely named SVGs from each LO call.
+    temp_lo_svg_output_dir = os.path.join(
+        output_dir, f"lo_indiv_svg_temp_{uuid.uuid4().hex[:8]}")
+    os.makedirs(temp_lo_svg_output_dir, exist_ok=True)
+    abs_temp_lo_svg_output_dir = os.path.abspath(temp_lo_svg_output_dir)
+
+    generated_svg_paths: Dict[int, str] = {}
+
+    for i in range(slide_count):
+        slide_number = i + 1  # Slide numbers are 1-based
+        # LibreOffice page numbers for export are often 1-based.
+        # Output filename from LO will usually be <original_filename_without_ext>_page_<page_number>.svg
+        # or just <original_filename_without_ext>.svg if it can only output one file.
+        # We will try to make the output file specific to avoid overwrites in the temp dir.
+
+        # The actual output filename by LibreOffice when converting a single page from a multi-page doc
+        # with --export-page and --outdir can be just the original filename with new extension.
+        # To handle this safely and ensure unique files in our temp dir from each call,
+        # we can tell LO to output to a sub-directory per slide, or rename immediately.
+        # Simpler: use outdir, and expect LO to name the file as presentation_name.svg.
+        # We then rename this to our slide_N.svg convention.
+
+        # Let LO write its default name (e.g., original_filename.svg) into the temp output dir.
+        # We will move and rename it after successful conversion of *this specific slide*.
+
+        # Construct the expected output file name by LibreOffice (usually original_filename.svg)
+        presentation_basename = os.path.splitext(
+            os.path.basename(abs_presentation_path))[0]
+        expected_lo_output_filename = f"{presentation_basename}.svg"
+        # This is the path where LO will place its output for the current slide conversion
+        current_slide_lo_output_path = os.path.join(
+            abs_temp_lo_svg_output_dir, expected_lo_output_filename)
+
+        # Delete this expected output file if it exists from a previous iteration (unlikely with unique temp dir per call now)
+        # but good for safety if LO overwrites.
+        if os.path.exists(current_slide_lo_output_path):
+            try:
+                os.remove(current_slide_lo_output_path)
+            except OSError as e:
+                logger.warning(
+                    f"Could not remove existing temp LO output {current_slide_lo_output_path}: {e}")
+
+        try:
+            logger.info(
+                f"Attempting to convert slide {slide_number} of {slide_count} from {abs_presentation_path} to SVG")
+
+            # Command to export a single page (slide)
+            # Using --export-filter-options="PageRange=<page_num>" might be more robust for impress
+            # or simply --page <page_num> or --select-page <page_num> (syntax varies)
+            # The most common for Impress seems to be an export filter option like PageRange=N
+            # Let's try with a filter option. Page numbers are usually 1-based.
+            # Filter options format: PageRange=N for a single page N (1-based).
+            # Or PageRange=N-M for a range. We need PageRange=slide_number.
+            # The filter name is impress_svg_Export. Options are appended after a colon.
+            # Example: "impress_svg_Export:PageRange=1"
+            # For SVG, some use "impress_svg_Export:SVGPages=1" (1 for current, 2 for all)
+            # The --page option in soffice man page: --page <range>
+            # Example: --page 1-1 for first page. Let's try this as it's simpler.
+
+            command = [
+                settings.LIBREOFFICE_PATH,
+                "--headless",
+                # "--convert-to", f'svg:impress_svg_Export:PageRange={slide_number}', # This is complex and might not be right
+                "--convert-to", "svg:impress_svg_Export",  # Keep filter simple
+                # Added export-page argument
+                f"--export-page", str(slide_number),
+                "--outdir", abs_temp_lo_svg_output_dir,  # Output to our general temp LO dir
+                abs_presentation_path
+            ]
+
+            process = subprocess.run(
+                command,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=120  # Shorter timeout for single slide
+            )
+            logger.info(
+                f"LibreOffice SVG conversion for slide {slide_number} stdout: {process.stdout}")
+            if process.stderr:
+                logger.warning(
+                    f"LibreOffice SVG conversion for slide {slide_number} stderr: {process.stderr}")
+
+            # After conversion, LibreOffice should have created a file (e.g., originalfilename.svg) in abs_temp_lo_svg_output_dir
+            if os.path.exists(current_slide_lo_output_path):
+                final_svg_name = f"slide_{slide_number}.svg"
+                # Place in final output_dir
+                final_svg_path = os.path.join(output_dir, final_svg_name)
+                shutil.move(current_slide_lo_output_path, final_svg_path)
+                generated_svg_paths[slide_number] = final_svg_path
+                logger.info(
+                    f"Successfully converted and moved slide {slide_number} to {final_svg_path}")
+            else:
+                logger.error(
+                    f"LibreOffice converted slide {slide_number}, but expected output file {current_slide_lo_output_path} not found.")
+                # If one slide fails, we might want to stop or continue and use fallback for this one.
+                # For now, let's return empty to trigger fallback for all if any single slide fails this way.
+                # return {} # This would stop all LO processing
+                # Better: just skip this slide, allow fallback for it later
+                continue
+
+        except subprocess.CalledProcessError as e:
+            logger.error(
+                f"Error running LibreOffice for SVG conversion of slide {slide_number}: {e}")
+            logger.error(
+                f"SVG Command (slide {slide_number}) output: {e.stdout}")
+            logger.error(
+                f"SVG Command (slide {slide_number}) error: {e.stderr}")
+            continue  # Continue to next slide, allow fallback for this one
+        except subprocess.TimeoutExpired:
+            logger.error(
+                f"LibreOffice SVG conversion for slide {slide_number} timed out.")
+            continue  # Continue to next slide, allow fallback for this one
+        except Exception as e:
+            logger.error(
+                f"Unexpected error during LibreOffice SVG conversion for slide {slide_number}: {str(e)}", exc_info=True)
+            continue  # Continue to next slide, allow fallback for this one
+
+    # Clean up the main temporary directory for LO outputs if it still exists and is empty
+    # (individual files should have been moved or handled)
+    if os.path.exists(abs_temp_lo_svg_output_dir):
+        try:
+            if not os.listdir(abs_temp_lo_svg_output_dir):  # Check if empty
+                shutil.rmtree(abs_temp_lo_svg_output_dir)
+                logger.info(
+                    f"Cleaned up empty temporary LibreOffice individual SVG output directory: {abs_temp_lo_svg_output_dir}")
+            else:
+                logger.warning(
+                    f"Temporary LibreOffice individual SVG output directory {abs_temp_lo_svg_output_dir} is not empty. Manual check may be needed.")
+        except Exception as e:
+            logger.error(
+                f"Error cleaning up temp LO individual SVG dir {abs_temp_lo_svg_output_dir}: {e}")
+
+    return generated_svg_paths
+
+
+async def queue_pptx_processing(
+    job_id: str,
+    session_id: str,
+    file_path: str,
+    source_language: Optional[str] = None,
+    target_language: Optional[str] = None,
+    generate_thumbnails: bool = True
+) -> None:
+    """
+    Queue the PPTX processing task.
+    """
+    # Store the file path for potential retry
+    _job_file_paths[job_id] = file_path
+
+    await update_local_job_status(
+        job_id=job_id,
+        status=ProcessingStatusResponse(
+            job_id=job_id,
+            session_id=session_id,
+            status=ProcessingStatus.PROCESSING,
+            progress=0,
+            current_stage="Starting processing"
+        )
+    )
+    loop = asyncio.get_event_loop()
+    loop.create_task(
+        process_pptx(
+            job_id=job_id,
+            session_id=session_id,
+            file_path=file_path,
+            source_language=source_language,
+            target_language=target_language,
+            generate_thumbnails=generate_thumbnails
+        )
+    )
+
+
+async def process_pptx(
+    job_id: str,
+    session_id: str,
+    file_path: str,
+    source_language: Optional[str] = None,
+    target_language: Optional[str] = None,
+    generate_thumbnails: bool = True
+) -> None:
+    """
+    Process a PPTX file.
+    """
+    start_time = time.time()
+    # processing_dir is the main directory for this job's outputs (SVGs, JSON)
+    # It's inside the uploaded file's directory.
+    uploaded_file_dir = os.path.dirname(file_path)
+    processing_output_dir = os.path.join(
+        uploaded_file_dir, "processing_output")
+    os.makedirs(processing_output_dir, exist_ok=True)
+
+    libreoffice_svgs: Dict[int, str] = {}
+
+    try:
+        # Check LibreOffice availability
+        if settings.LIBREOFFICE_PATH and os.path.exists(settings.LIBREOFFICE_PATH):
+            try:
+                # Use --help as it's more reliable than --version for some LO installations
+                test_command = [settings.LIBREOFFICE_PATH, "--help"]
+                test_result = subprocess.run(
+                    test_command, check=True, capture_output=True, text=True, timeout=30)
+                logger.info(
+                    f"LibreOffice is available at: {settings.LIBREOFFICE_PATH}")
+            except Exception as e:
+                logger.warning(
+                    f"LibreOffice path is set but test failed: {str(e)}. Will use fallback SVG generation if optimized path fails.")
+        else:
+            logger.info(
+                "LibreOffice path not configured or invalid. Using fallback SVG generation.")
+
+        presentation = Presentation(file_path)
+        slide_count = len(presentation.slides)
+
+        await update_local_job_status(
+            job_id=job_id,
+            status=ProcessingStatusResponse(
+                job_id=job_id, session_id=session_id, status=ProcessingStatus.PROCESSING,
+                progress=5, current_stage=f"Opened presentation with {slide_count} slides"
+            )
+        )
+
+        # Attempt to generate all SVGs using LibreOffice in one go
+        if settings.LIBREOFFICE_PATH and os.path.exists(settings.LIBREOFFICE_PATH):
+            # Pass the original file_path to LibreOffice, and processing_output_dir for its outputs
+            libreoffice_svgs = await _generate_svgs_for_all_slides_libreoffice(
+                file_path, processing_output_dir, slide_count
+            )
+            if libreoffice_svgs:
+                logger.info(
+                    f"Successfully pre-generated {len(libreoffice_svgs)} SVGs using LibreOffice.")
+            else:
+                logger.info(
+                    "Failed to pre-generate SVGs with LibreOffice, will use fallback per slide.")
+
+        processed_slides_data = []
+        for idx, slide in enumerate(presentation.slides):
+            slide_number = idx + 1
+            progress = 5 + int((idx / slide_count) * 90)
+            await update_local_job_status(
+                job_id=job_id,
+                status=ProcessingStatusResponse(
+                    job_id=job_id, session_id=session_id, status=ProcessingStatus.PROCESSING,
+                    progress=progress, current_stage=f"Processing slide {slide_number} of {slide_count}"
+                )
+            )
+
+            # slide_specific_output_dir is for thumbnails and fallback SVGs for this specific slide
+            slide_specific_output_dir = os.path.join(
+                processing_output_dir, f"slide_{slide_number}_assets")
+            os.makedirs(slide_specific_output_dir, exist_ok=True)
+
+            processed_slide = await process_slide(
+                slide=slide,
+                slide_number=slide_number,
+                # Pass slide_specific_output_dir for assets related to this slide (thumbnails, fallback SVG)
+                slide_assets_dir=slide_specific_output_dir,
+                # Pass processing_output_dir for the main LibreOffice SVGs if available
+                main_processing_dir=processing_output_dir,
+                libreoffice_generated_svg_path=libreoffice_svgs.get(
+                    slide_number),  # Pass path if LO generated it
+                session_id=session_id,
+                generate_thumbnail=generate_thumbnails
+            )
+            processed_slides_data.append(processed_slide)
+
+        processing_time = int(time.time() - start_time)
+        result = ProcessedPresentation(
+            session_id=session_id, slide_count=slide_count,
+            processing_status=OverallProcessingStatus.COMPLETED,
+            processing_time=processing_time, slides=processed_slides_data
+        )
+
+        result_file = os.path.join(
+            processing_output_dir, f"result_{session_id}.json")
+        with open(result_file, "w") as f:
+            # Use result.dict() for Pydantic v1, result.model_dump() for v2
+            json.dump(result.dict(), f, indent=4)
+
+        result_url = await upload_file_to_supabase(
+            file_path=result_file,
+            bucket="processing-results", destination_path=f"{session_id}/result.json"
+        )
+
+        await update_local_job_status(
+            job_id=job_id,
+            status=ProcessingStatusResponse(
+                job_id=job_id, session_id=session_id, status=ProcessingStatus.COMPLETED,
+                progress=100, current_stage="Processing completed", completed_at=datetime.now()
+            )
+        )
+        await update_job_status(
+            session_id=session_id, status="completed",
+            slide_count=slide_count, result_url=result_url
+        )
+
+    except Exception as e:
+        logger.error(f"Error processing PPTX: {str(e)}", exc_info=True)
+        await update_local_job_status(
+            job_id=job_id,
+            status=ProcessingStatusResponse(
+                job_id=job_id, session_id=session_id, status=ProcessingStatus.FAILED,
+                progress=0, current_stage="Processing failed", error=str(e)
+            )
+        )
+        await update_job_status(
+            session_id=session_id, status="failed", error=str(e)
+        )
+    finally:
+        # Clean up the main directory containing the uploaded file and its processing_output
+        try:
+            # uploaded_file_dir is the parent of processing_output_dir and contains the original upload
+            # This was: shutil.rmtree(os.path.dirname(file_path)) which is uploaded_file_dir
+            if os.path.exists(uploaded_file_dir):
+                # Only clean up if this is not a retry attempt (otherwise we'd lose the file)
+                status = await get_job_status(job_id)
+                if status and status.status != "queued" and status.status != "processing":
+                    shutil.rmtree(uploaded_file_dir)
+                    logger.info(
+                        f"Cleaned up temporary processing directory: {uploaded_file_dir}")
+
+                    # Remove from job file paths cache if we've deleted the file
+                    if job_id in _job_file_paths:
+                        del _job_file_paths[job_id]
+        except Exception as e:
+            logger.error(
+                f"Error cleaning up temporary files at {uploaded_file_dir}: {str(e)}")
+
+
+async def process_slide(
+    slide,  # This is a python-pptx Slide object
+    slide_number: int,
+    slide_assets_dir: str,  # Dir for thumbnails, fallback SVGs for this specific slide
+    # Main dir where LO SVGs might be (e.g. slide_1.svg)
+    main_processing_dir: str,
+    # Path to LO SVG if pre-generated
+    libreoffice_generated_svg_path: Optional[str],
+    session_id: str,
+    generate_thumbnail: bool = True
+) -> ProcessedSlide:
+    """
+    Process a single slide.
+    Uses pre-generated LibreOffice SVG if available, otherwise falls back to ElementTree.
+    """
+    slide_id = str(uuid.uuid4())
+    # slide_assets_dir is already created by process_pptx
+    # os.makedirs(slide_assets_dir, exist_ok=True)
+
+    # Get slide dimensions from the presentation's slide master
+    # In python-pptx, slides inherit dimensions from slide masters
+    presentation = slide.part.package.presentation_part.presentation
+    slide_width_emu = presentation.slide_width
+    slide_height_emu = presentation.slide_height
+
+    # Extract shapes and their data first, as it's needed for both SVG fallback and final output
+    extracted_shapes_data = extract_shapes(
+        slide, slide_width_emu, slide_height_emu)
+
+    svg_file_to_upload: Optional[str] = None
+
+    if libreoffice_generated_svg_path and os.path.exists(libreoffice_generated_svg_path):
+        logger.info(
+            f"Using pre-generated LibreOffice SVG for slide {slide_number}: {libreoffice_generated_svg_path}")
+        svg_file_to_upload = libreoffice_generated_svg_path
+    else:
+        logger.info(
+            f"LibreOffice SVG not available for slide {slide_number}. Generating SVG using ElementTree fallback.")
+        fallback_svg_path = os.path.join(
+            slide_assets_dir, f"slide_{slide_number}_fallback.svg")
+        # Pass extracted_shapes_data to avoid re-calculating
+        create_svg_from_slide(
+            slide_shapes_data=extracted_shapes_data,
+            file_path=fallback_svg_path,
+            width_emu=slide_width_emu,
+            height_emu=slide_height_emu,
+            slide_background_fill=get_slide_background_fill(
+                slide)  # Get background fill
+        )
+        if os.path.exists(fallback_svg_path):
+            svg_file_to_upload = fallback_svg_path
+        else:
+            logger.error(
+                f"Fallback SVG generation failed for slide {slide_number}")
+            # Create a minimal empty SVG as a last resort to avoid crashes downstream
+            fallback_svg_path = os.path.join(
+                slide_assets_dir, f"slide_{slide_number}_empty.svg")
+            create_minimal_svg(fallback_svg_path,
+                               slide_width_emu, slide_height_emu)
+            svg_file_to_upload = fallback_svg_path
+
+    svg_url = None
+    if svg_file_to_upload and os.path.exists(svg_file_to_upload):
+        svg_url = await upload_file_to_supabase(
+            file_path=svg_file_to_upload,
+            bucket="slide-visuals", destination_path=f"{session_id}/slide_{slide_number}.svg"
+        )
+    else:
+        logger.error(
+            f"No SVG file could be prepared for upload for slide {slide_number}")
+
+    thumbnail_url = None
+    if generate_thumbnail:
+        thumbnail_file = os.path.join(
+            slide_assets_dir, f"thumbnail_{slide_number}.png")
+        # Pass shapes_data if create_thumbnail_from_slide can use it, or slide object
+        create_thumbnail_from_slide_pil(
+            slide, extracted_shapes_data, thumbnail_file, slide_width_emu, slide_height_emu)
+        if os.path.exists(thumbnail_file):
+            thumbnail_url = await upload_file_to_supabase(
+                file_path=thumbnail_file,
+                bucket="slide-visuals", destination_path=f"{session_id}/thumbnails/slide_{slide_number}.png"
+            )
+
+    return ProcessedSlide(
+        slide_id=slide_id, slide_number=slide_number, svg_url=svg_url or "",
+        original_width=slide_width_emu, original_height=slide_height_emu,
+        thumbnail_url=thumbnail_url, shapes=extracted_shapes_data
+    )
+
+
+def get_slide_background_fill(slide) -> str:
+    """
+    Attempts to get the slide background fill color.
+    Returns a hex color string (e.g., "#FFFFFF") or a default.
+    Note: python-pptx has limitations in accessing complex background fills (gradients, pictures).
+    This function will try to get solid fills.
+    """
+    try:
+        fill = slide.background.fill
+        if fill.type == 1:  # MSO_FILL.SOLID
+            rgb = fill.fore_color.rgb
+            return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
+        # Handling for MSO_FILL.GRADIENT, MSO_FILL.PATTERN, MSO_FILL.PICTURE etc. is more complex
+        # and often not fully exposed or easily convertible to a single SVG color.
+    except Exception as e:
+        logger.debug(f"Could not determine slide background color: {e}")
+    return "#ffffff"  # Default to white
+
+
+def create_minimal_svg(file_path: str, width_emu: int, height_emu: int):
+    """Creates a minimal valid SVG file, e.g., if all generations fail."""
+    EMU_PER_INCH = 914400
+    DPI = 96
+    width_px = int((width_emu / EMU_PER_INCH) * DPI)
+    height_px = int((height_emu / EMU_PER_INCH) * DPI)
+
+    svg_root = ET.Element('svg', xmlns='http://www.w3.org/2000/svg',
+                          width=str(width_px), height=str(height_px),
+                          viewBox=f'0 0 {width_px} {height_px}')
+    ET.SubElement(svg_root, 'rect', width='100%',
+                  height='100%', fill='#f0f0f0')
+    text = ET.SubElement(svg_root, 'text', x='10', y='20', fill='red')
+    text.text = "Error generating slide SVG"
+    tree = ET.ElementTree(svg_root)
+    ET.register_namespace('', 'http://www.w3.org/2000/svg')
+    try:
+        tree.write(file_path, encoding='utf-8', xml_declaration=True)
+        logger.info(f"Created minimal fallback SVG: {file_path}")
+    except Exception as e:
+        logger.error(f"Failed to write minimal SVG {file_path}: {e}")
+
+# Removed convert_slide_to_svg_using_libreoffice as it's replaced by _generate_svgs_for_all_slides_libreoffice
+
+
+def extract_shapes(slide, slide_width_emu: int, slide_height_emu: int) -> List[SlideShape]:
+    """
+    Extract text and image shapes from a slide with their coordinates and styles.
+    Coordinates are returned as percentages of slide dimensions.
+    Dimensions are in EMU.
+    """
+    shapes_data = []
+    # Ensure slide_width_emu and slide_height_emu are not zero to avoid DivisionByZero
+    if slide_width_emu == 0 or slide_height_emu == 0:
+        logger.warning(
+            "Slide dimensions are zero, cannot calculate percentage-based shape coordinates.")
+        return []
+
+    for idx, shape in enumerate(slide.shapes):
+        shape_left_emu = shape.left if shape.left is not None else 0
+        shape_top_emu = shape.top if shape.top is not None else 0
+        shape_width_emu = shape.width if shape.width is not None else 0
+        shape_height_emu = shape.height if shape.height is not None else 0
+
+        x_percent = (shape_left_emu / slide_width_emu) * 100
+        y_percent = (shape_top_emu / slide_height_emu) * 100
+        width_percent = (shape_width_emu / slide_width_emu) * 100
+        height_percent = (shape_height_emu / slide_height_emu) * 100
+
+        shape_obj_data = {
+            "shape_id": str(uuid.uuid4()),
+            "x_coordinate": x_percent,
+            "y_coordinate": y_percent,
+            "width": width_percent,
+            "height": height_percent,
+            "coordinates_unit": CoordinateUnit.PERCENTAGE,
+            "reading_order": idx + 1,
+            "original_text": None,  # Default
+        }
+
+        if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+            try:
+                image = shape.image
+                image_bytes = image.blob
+                image_base64_str = base64.b64encode(
+                    image_bytes).decode('utf-8')
+                shape_obj_data.update({
+                    "shape_type": ShapeType.IMAGE,
+                    "image_content_type": image.content_type,
+                    "image_base64": image_base64_str
+                })
+                shapes_data.append(SlideShape(**shape_obj_data))
+            except Exception as e:
+                logger.warning(
+                    f"Could not extract image data for shape {idx}: {e}")
+                # Optionally, add a placeholder or skip
+                continue
+
+        elif shape.has_text_frame:
+            text_frame = shape.text_frame
+            full_text = text_frame.text.strip() if text_frame.text else ""
+            if not full_text:
+                continue
+
+            shape_obj_data["original_text"] = full_text
+
+            # Default style information
+            font_size_pt = 12.0
+            font_family = "Arial"
+            font_weight = "normal"
+            font_style = "normal"
+            hex_color = "#000000"
+            text_align_str = "LEFT"  # Default from PP_ALIGN
+            vertical_anchor_str = "TOP"  # Default from MSO_VERTICAL_ANCHOR
+            line_spacing_val = 1.0  # Default line spacing multiplier
+
+            if text_frame.paragraphs:
+                first_paragraph = text_frame.paragraphs[0]
+
+                # Text Alignment
+                if first_paragraph.alignment:
+                    alignment_map = {
+                        PP_ALIGN.LEFT: "LEFT", PP_ALIGN.CENTER: "CENTER",
+                        PP_ALIGN.RIGHT: "RIGHT", PP_ALIGN.JUSTIFY: "JUSTIFY",
+                        PP_ALIGN.DISTRIBUTE: "DISTRIBUTE", PP_ALIGN.THAI_DISTRIBUTE: "THAI_DISTRIBUTE"
+                    }
+                    text_align_str = alignment_map.get(
+                        first_paragraph.alignment, "LEFT")
+
+                # Line Spacing (complex, simplified here)
+                # PPT stores line spacing in different ways (multiples of lines, points)
+                # We simplify to a multiplier relative to font size.
+                if first_paragraph.line_spacing is not None:
+                    # Usually multiple of lines
+                    if isinstance(first_paragraph.line_spacing, float):
+                        line_spacing_val = first_paragraph.line_spacing
+                    elif hasattr(first_paragraph.line_spacing, 'pt'):  # If in points
+                        # Estimate based on a common default font size if run font size is not available
+                        run_font_size_for_spacing = Pt(12)  # Default
+                        if first_paragraph.runs and first_paragraph.runs[0].font and first_paragraph.runs[0].font.size:
+                            run_font_size_for_spacing = first_paragraph.runs[0].font.size
+
+                        if run_font_size_for_spacing and run_font_size_for_spacing.pt > 0:
+                            line_spacing_val = first_paragraph.line_spacing.pt / run_font_size_for_spacing.pt
+                        else:  # Fallback if font size is zero or unavailable
+                            line_spacing_val = 1.15  # A common default multiplier
+
+                # Font properties from the first run of the first paragraph
+                if first_paragraph.runs:
+                    first_run = first_paragraph.runs[0]
+                    if first_run.font:
+                        font = first_run.font
+                        if font.size:
+                            font_size_pt = font.size.pt
+                        if font.name:
+                            font_family = font.name
+                        if font.bold:
+                            font_weight = "bold"
+                        if font.italic:
+                            font_style = "italic"
+                        if font.color.type == 1 and font.color.rgb:  # MSO_COLOR_TYPE.RGB
+                            hex_color = f"#{font.color.rgb[0]:02x}{font.color.rgb[1]:02x}{font.color.rgb[2]:02x}"
+                        # MSO_COLOR_TYPE.SCHEME is more complex, involves theme colors
+                        # MSO_THEME_COLOR_INDEX
+                        elif font.color.type == 2 and hasattr(font.color, 'theme_color'):
+                            # This requires resolving theme colors, which is complex.
+                            # For simplicity, we might ignore or use a default.
+                            # logger.debug(f"Scheme color used: {font.color.theme_color}, brightness: {font.color.brightness}")
+                            pass  # Placeholder for scheme color handling
+
+            # Vertical Anchor for the text frame
+            if text_frame.vertical_anchor:
+                anchor_map = {
+                    MSO_VERTICAL_ANCHOR.TOP: "TOP",
+                    MSO_VERTICAL_ANCHOR.MIDDLE: "MIDDLE",
+                    MSO_VERTICAL_ANCHOR.BOTTOM: "BOTTOM"
+                }
+                vertical_anchor_str = anchor_map.get(
+                    text_frame.vertical_anchor, "TOP")
+
+            shape_obj_data.update({
+                "shape_type": ShapeType.TEXT,
+                "font_size": font_size_pt,
+                "font_family": font_family,
+                "font_weight": font_weight,
+                "font_style": font_style,
+                "color": hex_color,
+                "text_align": text_align_str,
+                "vertical_anchor": vertical_anchor_str,
+                "line_spacing": line_spacing_val,
+            })
+            shapes_data.append(SlideShape(**shape_obj_data))
+    return shapes_data
+
+
+def create_svg_from_slide(
+    slide_shapes_data: List[SlideShape],
+    file_path: str,
+    width_emu: int,
+    height_emu: int,
+    slide_background_fill: str = "#ffffff"  # Added background fill parameter
+) -> None:
+    """
+    Create an SVG representation of a PowerPoint slide using XML generation.
+    Uses pre-extracted shapes_data.
+    """
+    EMU_PER_INCH = 914400
+    DPI = 96
+    POINTS_PER_INCH = 72
+
+    width_px = max(1, int((width_emu / EMU_PER_INCH) * DPI))
+    height_px = max(1, int((height_emu / EMU_PER_INCH) * DPI))
+
+    svg_root = ET.Element('svg', xmlns='http://www.w3.org/2000/svg',
+                          # Added for Pydantic v1 compatibility
+                          xmlns_xlink='http://www.w3.org/1999/xlink',
+                          width=str(width_px), height=str(height_px),
+                          viewBox=f'0 0 {width_px} {height_px}')
+
+    # Slide Background
+    background = ET.SubElement(
+        svg_root, 'rect', width='100%', height='100%', fill=slide_background_fill)
+
+    # Optional: Slide Border (can be made configurable)
+    # border = ET.SubElement(svg_root, 'rect', x='0', y='0', width=str(width_px), height=str(height_px),
+    #                       fill='none', stroke='#e0e0e0', stroke_width='1')
+
+    for shape_data in slide_shapes_data:
+        # Calculate pixel values from percentage data
+        x_px_shape = int((shape_data.x_coordinate / 100) * width_px)
+        y_px_shape = int((shape_data.y_coordinate / 100) * height_px)
+        # Ensure width is at least 1px
+        w_px_shape = max(1, int((shape_data.width / 100) * width_px))
+        # Ensure height is at least 1px
+        h_px_shape = max(1, int((shape_data.height / 100) * height_px))
+
+        if shape_data.shape_type == ShapeType.IMAGE and shape_data.image_base64:
+            image_element = ET.SubElement(svg_root, 'image',
+                                          x=str(x_px_shape), y=str(y_px_shape),
+                                          width=str(w_px_shape), height=str(h_px_shape),
+                                          preserveAspectRatio="xMidYMid meet")  # Added preserveAspectRatio
+            image_element.set('{http://www.w3.org/1999/xlink}href',
+                              f"data:{shape_data.image_content_type};base64,{shape_data.image_base64}")
+
+        elif shape_data.shape_type == ShapeType.TEXT and shape_data.original_text:
+            text_g = ET.SubElement(svg_root, 'g', id=shape_data.shape_id,
+                                   transform=f"translate({x_px_shape},{y_px_shape})")
+
+            # Optional: Add a bounding box for the text container for visualization/debugging
+            # text_bg_rect = ET.SubElement(text_g, 'rect',
+            #                              x="0", y="0",
+            #                              width=str(w_px_shape), height=str(h_px_shape),
+            #                              fill="rgba(200,200,200,0.1)", stroke="#cccccc", stroke_width="0.5")
+
+            text_element = ET.SubElement(text_g, 'text',
+                                         font_family=shape_data.font_family or "Arial",
+                                         fill=shape_data.color or "#000000")
+
+            font_size_px = max(
+                1, int((shape_data.font_size or 12.0) * (DPI / POINTS_PER_INCH)))
+            text_element.set('font-size', str(font_size_px))
+
+            if shape_data.font_weight == "bold":
+                text_element.set('font-weight', 'bold')
+            if shape_data.font_style == "italic":
+                text_element.set('font-style', 'italic')
+
+            # Text Alignment (text-anchor)
+            text_anchor = "start"  # Default for LTR languages
+            # Adjust x for text-anchor. Margin for padding within the shape.
+            text_x_offset = 5
+            if shape_data.text_align == "CENTER":
+                text_anchor = "middle"
+                text_x_offset = w_px_shape / 2
+            elif shape_data.text_align == "RIGHT":
+                text_anchor = "end"
+                text_x_offset = w_px_shape - 5
+            text_element.set('text-anchor', text_anchor)
+
+            # Vertical Alignment (dominant-baseline and y position of first tspan)
+            # This is tricky in SVG. We try to approximate.
+            # 'dy' on tspans handles line spacing. The initial 'y' sets the first line's position.
+
+            # Estimate first line's Y based on vertical anchor
+            # This requires careful adjustment. dominant-baseline is key.
+            # Default: top-aligned-ish (cap-height)
+            first_line_y_px = font_size_px
+
+            if shape_data.vertical_anchor == "TOP":
+                text_element.set('dominant-baseline',
+                                 'text-before-edge')  # or 'hanging'
+                first_line_y_px = 5  # Small padding from top
+            elif shape_data.vertical_anchor == "MIDDLE":
+                text_element.set('dominant-baseline', 'central')  # or 'middle'
+                first_line_y_px = h_px_shape / 2
+            elif shape_data.vertical_anchor == "BOTTOM":
+                text_element.set('dominant-baseline', 'text-after-edge')
+                first_line_y_px = h_px_shape - 5  # Small padding from bottom
+            else:  # Default to hanging/text-before-edge for better top alignment
+                text_element.set('dominant-baseline', 'hanging')
+                first_line_y_px = 5
+
+            lines = shape_data.original_text.splitlines()
+            if not lines:
+                # Ensure at least one tspan if text is empty but shape exists
+                lines = [' ']
+
+            line_spacing_multiplier = shape_data.line_spacing if (
+                shape_data.line_spacing and shape_data.line_spacing > 0) else 1.15
+            # Actual line height in pixels for use with 'dy'
+            actual_line_height_px = font_size_px * line_spacing_multiplier
+
+            for i, line_text in enumerate(lines):
+                tspan = ET.SubElement(text_element, 'tspan',
+                                      x=str(text_x_offset))
+                # Use non-breaking space for empty lines
+                tspan.text = line_text if line_text.strip() else ' '
+
+                if i == 0:
+                    tspan.set('y', str(first_line_y_px))
+                else:
+                    # Use 'px' for clarity, though unitless often works for dy
+                    tspan.set('dy', f"{actual_line_height_px}px")
+
+    tree = ET.ElementTree(svg_root)
+    ET.register_namespace('', 'http://www.w3.org/2000/svg')
+    ET.register_namespace('xlink', 'http://www.w3.org/1999/xlink')
+    try:
+        tree.write(file_path, encoding='utf-8', xml_declaration=True)
+    except Exception as e:
+        logger.error(f"Error writing SVG file {file_path}: {e}")
+
+
+def create_thumbnail_from_slide_pil(
+    slide,  # python-pptx slide object
+    shapes_data: List[SlideShape],  # Pre-extracted shapes data
+    file_path: str,
+    slide_width_emu: int,
+    slide_height_emu: int,
+    thumbnail_width_px: int = 250
+) -> None:
+    """
+    Create a thumbnail image for the slide using PIL, using extracted shapes data.
+    """
+    if slide_width_emu == 0 or slide_height_emu == 0:
+        logger.warning("Cannot generate thumbnail, slide dimensions are zero.")
+        # Create a tiny placeholder image
+        img = Image.new('RGB', (thumbnail_width_px,
+                        thumbnail_width_px // 2), color=(230, 230, 230))
+        draw = ImageDraw.Draw(img)
+        draw.text((10, 10), "Error: Zero slide dimensions", fill=(255, 0, 0))
+        img.save(file_path)
+        return
+
+    aspect_ratio = slide_height_emu / slide_width_emu
+    thumbnail_height_px = int(aspect_ratio * thumbnail_width_px)
+
+    # Use slide background color if available from slide object (simplified)
+    # For more accuracy, this could be passed or enhanced.
+    slide_bg_hex = get_slide_background_fill(slide)
+    try:
+        from PIL import ImageColor
+        image_bg_color = ImageColor.getrgb(slide_bg_hex)
+    except ValueError:
+        image_bg_color = (255, 255, 255)  # Default white
+
+    image = Image.new('RGB', (thumbnail_width_px,
+                      thumbnail_height_px), color=image_bg_color)
+    draw = ImageDraw.Draw(image)
+
+    # Draw slide border
+    draw.rectangle(
+        [(0, 0), (thumbnail_width_px-1, thumbnail_height_px-1)], outline=(200, 200, 200))
+
+    default_font = None
+    try:
+        default_font = ImageFont.truetype("arial.ttf", 10)
+    except IOError:
+        try:
+            default_font = ImageFont.load_default()  # Fallback to PIL default bitmap font
+        except IOError:
+            logger.warning(
+                "Thumbnail font not found, text rendering in thumbnails will be basic lines.")
+
+    for shape_data in shapes_data:
+        # Calculate thumbnail coordinates from percentage
+        x_thumb = int((shape_data.x_coordinate / 100) * thumbnail_width_px)
+        y_thumb = int((shape_data.y_coordinate / 100) * thumbnail_height_px)
+        w_thumb = int((shape_data.width / 100) * thumbnail_width_px)
+        h_thumb = int((shape_data.height / 100) * thumbnail_height_px)
+
+        if shape_data.shape_type == ShapeType.IMAGE and shape_data.image_base64:
+            try:
+                img_data = base64.b64decode(shape_data.image_base64)
+                from io import BytesIO
+                img_io = BytesIO(img_data)
+                shape_img = Image.open(img_io)
+                shape_img = shape_img.resize(
+                    (w_thumb, h_thumb), Image.Resampling.LANCZOS)
+                image.paste(shape_img, (x_thumb, y_thumb),
+                            mask=shape_img.convert("RGBA"))
+            except Exception as e:
+                logger.warning(
+                    f"Could not render image in thumbnail: {e}. Drawing placeholder.")
+                draw.rectangle([(x_thumb, y_thumb), (x_thumb + w_thumb, y_thumb + h_thumb)],
+                               fill=(200, 220, 255), outline=(150, 180, 230))
+                if default_font:
+                    draw.text((x_thumb + 2, y_thumb + 2),
+                              "[img]", font=default_font, fill=(0, 0, 0))
+
+        elif shape_data.shape_type == ShapeType.TEXT and shape_data.original_text:
+            # Draw text block placeholder
+            draw.rectangle([(x_thumb, y_thumb), (x_thumb + w_thumb, y_thumb + h_thumb)],
+                           fill=(240, 240, 240), outline=(180, 180, 180))
+
+            if default_font:
+                text_preview = (shape_data.original_text[:20] + '...') if len(
+                    shape_data.original_text) > 20 else shape_data.original_text
+                # Attempt to draw text, handle very small boxes
+                if w_thumb > 5 and h_thumb > 5:
+                    draw.text((x_thumb + 2, y_thumb + 2), text_preview,
+                              font=default_font, fill=(50, 50, 50))
+            else:  # Fallback if font is not available
+                draw.line([(x_thumb+2, y_thumb+h_thumb//2), (x_thumb +
+                          w_thumb-2, y_thumb+h_thumb//2)], fill=(100, 100, 100))
+    try:
+        image.save(file_path)
+    except Exception as e:
+        logger.error(f"Error saving thumbnail {file_path}: {e}")
+        # Attempt to save a minimal error image
+        try:
+            error_img = Image.new('RGB', (50, 20), color=(255, 0, 0))
+            ImageDraw.Draw(error_img).text((2, 2), "ERR", fill=(255, 255, 255))
+            error_img.save(file_path)
+        except:
+            pass  # Give up if even error image fails
+</file>
+
+<file path="app/services/results_service.py">
+import logging
+import json
+import requests
+from typing import Dict, Any, List, Optional
+
+from app.models.schemas import ProcessedPresentation
+from app.services.supabase_service import (
+    get_session_details,
+    get_slides_for_session,
+    get_shapes_for_slide
+)
+from app.core.config import get_settings
+
+logger = logging.getLogger(__name__)
+settings = get_settings()
+
+
+async def get_processing_results(
+    session_id: str
+) -> ProcessedPresentation:
+    """
+    Get the results of a processing job.
+
+    This can either:
+    1. Load the results from a JSON file stored in Supabase (faster, if available)
+    2. Reconstruct the results from the database tables (slides and slide_shapes)
+    """
+    try:
+        # First, try to get the session details to get the result URL
+        session = await get_session_details(session_id)
+
+        # If the session has a result URL, download and parse it
+        if "result_url" in session and session["result_url"]:
+            return await _get_results_from_json_url(session["result_url"])
+
+        # Otherwise, reconstruct from database
+        return await _reconstruct_results_from_database(session_id)
+
+    except FileNotFoundError:
+        # Propagate the FileNotFoundError
+        raise
+
+    except Exception as e:
+        logger.error(f"Error getting processing results: {str(e)}")
+        raise Exception(f"Failed to get processing results: {str(e)}")
+
+
+async def _get_results_from_json_url(result_url: str) -> ProcessedPresentation:
+    """
+    Download and parse the results JSON from a URL.
+    """
+    try:
+        response = requests.get(result_url)
+        response.raise_for_status()
+
+        result_json = response.json()
+        return ProcessedPresentation.parse_obj(result_json)
+
+    except Exception as e:
+        logger.error(f"Error getting results from JSON URL: {str(e)}")
+        raise Exception(f"Failed to get results from JSON URL: {str(e)}")
+
+
+async def _get_results_from_local_file(session_id: str) -> ProcessedPresentation:
+    """
+    Load the results from a local JSON file.
+    """
+    try:
+        with open(f"./processing/{session_id}/result_{session_id}.json", "r") as f:
+            result_json = json.load(f)
+            return ProcessedPresentation.parse_obj(result_json)
+
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Results not found for session: {session_id}")
+
+    except Exception as e:
+        logger.error(f"Error getting results from local file: {str(e)}")
+        raise Exception(f"Failed to get results from local file: {str(e)}")
+
+
+async def _reconstruct_results_from_database(
+    session_id: str
+) -> ProcessedPresentation:
+    """
+    Reconstruct the results from the database tables.
+    """
+    try:
+        # Get session details
+        session = await get_session_details(session_id)
+
+        # Get all slides for the session
+        slides_data = await get_slides_for_session(session_id)
+
+        if not slides_data:
+            raise FileNotFoundError(
+                f"No slides found for session: {session_id}")
+
+        # Process each slide
+        processed_slides = []
+        for slide_data in slides_data:
+            # Get shapes for the slide
+            shapes_data = await get_shapes_for_slide(slide_data["id"])
+
+            # Convert shapes data to SlideShape objects
+            shapes = []
+            for shape_data in shapes_data:
+                shape = {
+                    "shape_id": shape_data["id"],
+                    "shape_type": shape_data["shape_type"],
+                    "original_text": shape_data["original_text"],
+                    "x_coordinate": shape_data["x_coordinate"],
+                    "y_coordinate": shape_data["y_coordinate"],
+                    "width": shape_data["width"],
+                    "height": shape_data["height"],
+                    "coordinates_unit": shape_data["coordinates_unit"],
+                }
+
+                # Add optional fields if they exist
+                for field in ["font_size", "font_family", "font_weight", "font_style", "color", "reading_order"]:
+                    if field in shape_data and shape_data[field] is not None:
+                        shape[field] = shape_data[field]
+
+                shapes.append(shape)
+
+            # Create ProcessedSlide object
+            processed_slide = {
+                "slide_id": slide_data["id"],
+                "slide_number": slide_data["slide_number"],
+                "svg_url": slide_data["svg_url"],
+                "original_width": slide_data["original_width"],
+                "original_height": slide_data["original_height"],
+                "shapes": shapes,
+            }
+
+            # Add thumbnail_url if it exists
+            if "thumbnail_url" in slide_data and slide_data["thumbnail_url"]:
+                processed_slide["thumbnail_url"] = slide_data["thumbnail_url"]
+
+            processed_slides.append(processed_slide)
+
+        # Create ProcessedPresentation object
+        result = {
+            "session_id": session_id,
+            "slide_count": len(processed_slides),
+            "processing_status": "completed" if session["status"] == "completed" else "partially_completed",
+            "slides": processed_slides,
+        }
+
+        return ProcessedPresentation.parse_obj(result)
+
+    except FileNotFoundError:
+        # Propagate the FileNotFoundError
+        raise
+
+    except Exception as e:
+        logger.error(f"Error reconstructing results from database: {str(e)}")
+        raise Exception(
+            f"Failed to reconstruct results from database: {str(e)}")
+</file>
+
+<file path="app/services/supabase_service.py">
+import os
+import logging
+from typing import Optional, Dict, Any, List
+from supabase import create_client, Client
+from app.core.config import get_settings
+import urllib.parse
+
+logger = logging.getLogger(__name__)
+settings = get_settings()
+
+
+def _normalize_supabase_url(url: str) -> str:
+    """
+    Normalize Supabase URL to ensure it's properly formatted.
+    """
+    if not url:
+        return ""
+
+    # Ensure URL has a scheme
+    if not url.startswith(('http://', 'https://')):
+        url = 'http://' + url
+
+    # Parse and reconstruct to normalize
+    parsed = urllib.parse.urlparse(url)
+
+    # Remove trailing slashes
+    normalized_url = f"{parsed.scheme}://{parsed.netloc.rstrip('/')}"
+    if parsed.path and parsed.path != '/':
+        normalized_url += parsed.path.rstrip('/')
+
+    return normalized_url
+
+
+def _create_supabase_client(supabase_url: Optional[str] = None, supabase_key: Optional[str] = None) -> Client:
+    """
+    Create a Supabase client with proper error handling.
+    Uses the provided credentials or falls back to settings if not provided.
+    """
+    url = supabase_url or settings.SUPABASE_URL
+    key = supabase_key or settings.SUPABASE_KEY
+
+    if not url:
+        raise ValueError("Supabase URL is not configured")
+    if not key:
+        raise ValueError("Supabase API key is not configured")
+
+    # Clean the values - remove inline comments and quotes
+    # python-dotenv reads the entire line including comments
+    if '#' in url:
+        url = url.split('#')[0].strip()
+    if '#' in key:
+        key = key.split('#')[0].strip()
+
+    # Clean the key - remove whitespace, newlines and quotes
+    clean_key = key.strip().replace('\n', '').replace('\r', '')
+    if clean_key.startswith('"') and clean_key.endswith('"'):
+        clean_key = clean_key[1:-1]
+
+    # Clean the URL - remove quotes
+    clean_url = url.strip()
+    if clean_url.startswith('"') and clean_url.endswith('"'):
+        clean_url = clean_url[1:-1]
+
+    # Normalize the URL to ensure it's properly formatted
+    normalized_url = _normalize_supabase_url(clean_url)
+
+    try:
+        return create_client(normalized_url, clean_key)
+    except Exception as e:
+        logger.error(f"Error creating Supabase client: {str(e)}")
+        raise Exception(f"Failed to create Supabase client: {str(e)}")
+
+
+async def validate_supabase_credentials(supabase_url: Optional[str] = None, supabase_key: Optional[str] = None) -> bool:
+    """
+    Validate that the Supabase credentials are valid.
+    Uses the provided credentials or falls back to settings if not provided.
+    """
+    url = supabase_url or settings.SUPABASE_URL
+    key = supabase_key or settings.SUPABASE_KEY
+
+    if not url:
+        raise ValueError("Supabase URL is not configured")
+    if not key:
+        raise ValueError("Supabase API key is not configured")
+
+    # Clean the values - remove inline comments and quotes
+    if '#' in url:
+        url = url.split('#')[0].strip()
+    if '#' in key:
+        key = key.split('#')[0].strip()
+
+    # Remove quotes if present
+    if url.startswith('"') and url.endswith('"'):
+        url = url[1:-1]
+    if key.startswith('"') and key.endswith('"'):
+        key = key[1:-1]
+
+    # Normalize the URL to ensure it's properly formatted
+    normalized_url = _normalize_supabase_url(url)
+
+    try:
+        client = create_client(normalized_url, key)
+        # Simply check if we can create a client and get a response
+        # This is a lightweight check that doesn't require specific permissions
+        storage_buckets = client.storage.list_buckets()
+        return True
+    except Exception as e:
+        logger.error(f"Error validating Supabase credentials: {str(e)}")
+        raise Exception(f"Invalid Supabase credentials: {str(e)}")
+
+
+async def check_supabase_connection(supabase_url: Optional[str] = None, supabase_key: Optional[str] = None) -> bool:
+    """
+    Check if we can connect to Supabase.
+    Uses the provided credentials or falls back to settings if not provided.
+    """
+    try:
+        url = supabase_url or settings.SUPABASE_URL
+        key = supabase_key or settings.SUPABASE_KEY
+
+        if not url or not key:
+            logger.warning("Supabase credentials not configured")
+            return False
+
+        # Normalize the URL to ensure it's properly formatted
+        normalized_url = _normalize_supabase_url(url)
+        logger.debug(f"Checking Supabase connection to: {normalized_url}")
+
+        # Print the first few characters of the key for debugging
+        if key and len(key) > 10:
+            logger.debug(f"Using API key starting with: {key[:10]}...")
+
+        # Clean the values - remove inline comments
+        if '#' in url:
+            url = url.split('#')[0].strip()
+        if '#' in key:
+            key = key.split('#')[0].strip()
+
+        # Clean the key - remove whitespace, newlines and quotes
+        clean_key = key.strip().replace('\n', '').replace('\r', '')
+        if clean_key.startswith('"') and clean_key.endswith('"'):
+            clean_key = clean_key[1:-1]
+
+        # Clean the URL - remove quotes
+        clean_url = url.strip()
+        if clean_url.startswith('"') and clean_url.endswith('"'):
+            clean_url = clean_url[1:-1]
+
+        # Re-normalize after cleaning
+        normalized_url = _normalize_supabase_url(clean_url)
+
+        logger.debug(
+            f"Key length before cleaning: {len(key)}, after cleaning: {len(clean_key)}")
+
+        try:
+            client = create_client(normalized_url, clean_key)
+            logger.debug("Successfully created Supabase client")
+
+            # Just try to list buckets as a basic connectivity test
+            buckets = client.storage.list_buckets()
+            logger.debug(
+                f"Successfully listed buckets: {len(buckets)} buckets found")
+            return True
+        except Exception as e:
+            logger.error(f"Error connecting to Supabase: {str(e)}")
+            # Try to diagnose the error
+            if "API key" in str(e).lower() or "auth" in str(e).lower() or "unauthorized" in str(e).lower():
+                logger.error(
+                    "This appears to be an API key issue. Check your SUPABASE_KEY value.")
+            elif "URL" in str(e).upper() or "host" in str(e).lower() or "connection" in str(e).lower():
+                logger.error(
+                    "This appears to be a URL/connection issue. Check your SUPABASE_URL value.")
+            return False
+    except Exception as e:
+        logger.error(
+            f"Unexpected error in check_supabase_connection: {str(e)}")
+        return False
+
+
+async def upload_file_to_supabase(
+    file_path: str,
+    bucket: str,
+    destination_path: str
+) -> str:
+    """
+    Upload a file to Supabase Storage and return the public URL.
+    Uses Supabase credentials from settings.
+    """
+    try:
+        supabase = _create_supabase_client()
+
+        # Check if the bucket exists
+        buckets = supabase.storage.list_buckets()
+        bucket_exists = any(b["name"] == bucket for b in buckets)
+
+        if not bucket_exists:
+            try:
+                # Try to create the bucket
+                supabase.storage.create_bucket(bucket)
+                logger.info(f"Created storage bucket: {bucket}")
+            except Exception as bucket_error:
+                # If bucket creation fails (likely due to RLS), log but continue
+                # The bucket might already exist or need to be created manually
+                logger.warning(
+                    f"Could not create bucket '{bucket}': {str(bucket_error)}")
+                logger.warning(
+                    "Please ensure the bucket exists in Supabase Storage and has proper RLS policies")
+
+        # Try to upload the file regardless
+        with open(file_path, "rb") as f:
+            file_bytes = f.read()
+
+            # First, try to remove any existing file at this path (in case of retry)
+            try:
+                supabase.storage.from_(bucket).remove([destination_path])
+            except:
+                pass  # Ignore if file doesn't exist
+
+            # Upload the file
+            response = supabase.storage.from_(
+                bucket).upload(destination_path, file_bytes)
+
+        # Get the public URL
+        file_url = supabase.storage.from_(
+            bucket).get_public_url(destination_path)
+
+        return file_url
+
+    except Exception as e:
+        logger.error(f"Error uploading file to Supabase: {str(e)}")
+        raise Exception(f"Failed to upload file to Supabase: {str(e)}")
+
+
+async def update_job_status(
+    session_id: str,
+    status: str,
+    slide_count: Optional[int] = None,
+    result_url: Optional[str] = None,
+    error: Optional[str] = None
+) -> None:
+    """
+    Update the status of a translation session in Supabase.
+    Uses Supabase credentials from settings.
+    """
+    try:
+        supabase = _create_supabase_client()
+
+        # Prepare the update data
+        data = {"status": status}
+
+        if slide_count is not None:
+            data["slide_count"] = slide_count
+
+        if result_url is not None:
+            data["result_url"] = result_url
+
+        if error is not None:
+            data["error"] = error
+
+        # Update the session record
+        supabase.table("translation_sessions").update(
+            data).eq("id", session_id).execute()
+
+    except Exception as e:
+        logger.error(f"Error updating job status in Supabase: {str(e)}")
+        # We don't want to raise an exception here, as this is a non-critical operation
+        # that should not fail the entire processing pipeline
+
+
+async def save_slide_data(
+    session_id: str,
+    slide_data: Dict[str, Any]
+) -> str:
+    """
+    Save slide data to the slides table in Supabase.
+    Uses Supabase credentials from settings.
+    """
+    try:
+        supabase = _create_supabase_client()
+
+        # Prepare the slide data
+        data = {
+            "session_id": session_id,
+            "slide_number": slide_data["slide_number"],
+            "svg_url": slide_data["svg_url"],
+            "original_width": slide_data["original_width"],
+            "original_height": slide_data["original_height"],
+            "thumbnail_url": slide_data.get("thumbnail_url")
+        }
+
+        # Insert the slide record
+        response = supabase.table("slides").insert(data).execute()
+
+        # Return the inserted slide ID
+        return response.data[0]["id"]
+
+    except Exception as e:
+        logger.error(f"Error saving slide data to Supabase: {str(e)}")
+        raise Exception(f"Failed to save slide data to Supabase: {str(e)}")
+
+
+async def save_slide_shapes(
+    slide_id: str,
+    shapes: List[Dict[str, Any]]
+) -> None:
+    """
+    Save slide shape data to the slide_shapes table in Supabase.
+    Uses Supabase credentials from settings.
+    """
+    try:
+        supabase = _create_supabase_client()
+
+        # Prepare the shape data
+        data = []
+        for shape in shapes:
+            shape_data = {
+                "slide_id": slide_id,
+                "shape_type": shape["shape_type"],
+                "original_text": shape["original_text"],
+                "x_coordinate": shape["x_coordinate"],
+                "y_coordinate": shape["y_coordinate"],
+                "width": shape["width"],
+                "height": shape["height"],
+                "coordinates_unit": shape["coordinates_unit"],
+                "font_size": shape.get("font_size"),
+                "font_family": shape.get("font_family"),
+                "font_weight": shape.get("font_weight"),
+                "font_style": shape.get("font_style"),
+                "color": shape.get("color"),
+                "reading_order": shape.get("reading_order")
+            }
+            data.append(shape_data)
+
+        # Insert the shape records
+        if data:
+            supabase.table("slide_shapes").insert(data).execute()
+
+    except Exception as e:
+        logger.error(f"Error saving slide shapes to Supabase: {str(e)}")
+        raise Exception(f"Failed to save slide shapes to Supabase: {str(e)}")
+
+
+async def get_session_details(
+    session_id: str
+) -> Dict[str, Any]:
+    """
+    Get details of a translation session from Supabase.
+    Uses Supabase credentials from settings.
+    """
+    try:
+        supabase = _create_supabase_client()
+
+        # Query the session record
+        response = supabase.table("translation_sessions").select(
+            "*").eq("id", session_id).execute()
+
+        if not response.data:
+            raise FileNotFoundError(f"Session not found: {session_id}")
+
+        return response.data[0]
+
+    except Exception as e:
+        logger.error(f"Error getting session details from Supabase: {str(e)}")
+        raise Exception(
+            f"Failed to get session details from Supabase: {str(e)}")
+
+
+async def get_slides_for_session(
+    session_id: str
+) -> List[Dict[str, Any]]:
+    """
+    Get all slides for a translation session from Supabase.
+    Uses Supabase credentials from settings.
+    """
+    try:
+        supabase = _create_supabase_client()
+
+        # Query the slides for the session
+        response = supabase.table("slides").select(
+            "*").eq("session_id", session_id).order("slide_number").execute()
+
+        return response.data
+
+    except Exception as e:
+        logger.error(f"Error getting slides from Supabase: {str(e)}")
+        raise Exception(f"Failed to get slides from Supabase: {str(e)}")
+
+
+async def get_shapes_for_slide(
+    slide_id: str
+) -> List[Dict[str, Any]]:
+    """
+    Get all shapes for a slide from Supabase.
+    Uses Supabase credentials from settings.
+    """
+    try:
+        supabase = _create_supabase_client()
+
+        # Query the shapes for the slide
+        response = supabase.table("slide_shapes").select(
+            "*").eq("slide_id", slide_id).order("reading_order").execute()
+
+        return response.data
+
+    except Exception as e:
+        logger.error(f"Error getting shapes from Supabase: {str(e)}")
+        raise Exception(f"Failed to get shapes from Supabase: {str(e)}")
+</file>
+
+<file path="Dockerfile">
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libcairo2-dev \
+    libfreetype6-dev \
+    libffi-dev \
+    inkscape \
+    ghostscript \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install UV package manager
+RUN pip install --no-cache-dir uv
+
+# Copy requirements first for better layer caching
+COPY requirements.txt .
+RUN uv pip install --no-cache-dir -r requirements.txt
+
+# Copy the rest of the application
+COPY . .
+
+# Set environment variables
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+
+# Run the application
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+</file>
+
+<file path="docs/integration-guide.md">
+# PPTX Processor Service Integration Documentation
+
+## Overview
+The PPTX Processor Service is a Python FastAPI microservice that handles the conversion of PowerPoint (PPTX) files to SVG format, extracting text elements and their coordinates for interactive editing.
+
+## Base URL
+- Development: `http://localhost:8000`
+- Production: `https://pptx-processor.pptxtrans.com` (placeholder - update with actual URL)
+
+## Authentication
+- Include the Supabase JWT token in the `Authorization` header
+- Format: `Bearer <token>`
+
+## API Endpoints
+
+### 1. Process PPTX File
+```
+POST /v1/process
+```
+
+#### Request
+- Content-Type: `multipart/form-data`
+- Form Fields:
+  - `file`: PPTX file (required)
+  - `sessionId`: Unique session identifier (required)
+  - `sessionName`: Display name for the session (optional)
+  - `sourceLanguage`: Source language code (optional)
+  - `targetLanguage`: Target language code (optional)
+
+#### Response
+```json
+{
+  "jobId": "job-abc123",
+  "status": "processing",
+  "estimatedTimeSeconds": 45,
+  "sessionId": "session-123",
+  "message": "Processing started"
+}
+```
+
+### 2. Check Processing Status
+```
+GET /v1/status/{jobId}
+```
+
+#### Response
+```json
+{
+  "jobId": "job-abc123",
+  "status": "completed",
+  "progress": 100,
+  "sessionId": "session-123",
+  "slideCount": 15,
+  "message": "Processing complete",
+  "completedAt": "2023-06-15T14:35:00Z"
+}
+```
+
+Possible status values:
+- `queued`: Job is waiting to be processed
+- `processing`: Job is currently being processed
+- `completed`: Job has completed successfully
+- `failed`: Job has failed
+
+### 3. Get Processing Results
+```
+GET /v1/results/{sessionId}
+```
+
+#### Response
+```json
+{
+  "sessionId": "session-123",
+  "slideCount": 15,
+  "slides": [
+    {
+      "slideId": "slide-1",
+      "slideNumber": 1,
+      "svgUrl": "https://supabase-url/storage/slide_visuals/session-123/slide-1.svg",
+      "thumbnailUrl": "https://supabase-url/storage/slide_visuals/session-123/thumbnails/slide-1.png",
+      "width": 1280,
+      "height": 720,
+      "shapes": [
+        {
+          "shapeId": "shape-1",
+          "type": "text",
+          "originalText": "Slide Title",
+          "translatedText": "",
+          "x": 10.5,
+          "y": 15.2,
+          "width": 80.0,
+          "height": 10.0,
+          "styleData": {
+            "fontSize": 44,
+            "fontFamily": "Arial",
+            "isBold": true
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+### 4. Retry Failed Job
+```
+POST /v1/retry/{jobId}
+```
+
+#### Response
+Same format as `/v1/process` endpoint
+
+### 5. Health Check
+```
+GET /v1/health
+```
+
+#### Response
+```json
+{
+  "status": "ok",
+  "version": "1.0.0",
+  "libreOfficeAvailable": true
+}
+```
+
+## Error Handling
+All endpoints return standard HTTP status codes with detailed error messages:
+
+```json
+{
+  "error": {
+    "code": "invalid_file_format",
+    "message": "The uploaded file is not a valid PPTX file",
+    "details": {
+      "filename": "document.docx",
+      "expectedFormat": "pptx"
+    }
+  }
+}
+```
+
+## Frontend Integration Steps
+
+### Upload Workflow
+1. Create a translation session in Supabase
+2. Upload PPTX file to the processor service using `/v1/process`
+3. Store the returned `jobId` for status tracking
+4. Implement polling to check status using `/v1/status/{jobId}`
+5. Once status is `completed`, fetch results with `/v1/results/{sessionId}`
+6. Render slides using the returned SVG URLs and shape data
+
+### Recommended Polling Strategy
+- Initial check after 2 seconds
+- Subsequent checks every 5 seconds
+- Exponential backoff for longer processing jobs
+- Maximum polling duration: 5 minutes
+- Display progress indicator based on `progress` field
+
+## Database Integration
+The service automatically updates the following Supabase tables:
+- `slides`: Created for each slide with SVG URLs and dimensions
+- `slide_shapes`: Created for each text element with coordinates and text content
+
+## Configuration Requirements
+Environment variables needed:
+- `SUPABASE_URL`: Supabase project URL
+- `SUPABASE_SERVICE_KEY`: Supabase service role API key
+- `PROCESSING_RESULTS_DIR`: Directory for temporary processing files
+- `LIBREOFFICE_PATH`: Path to LibreOffice executable (e.g., `/usr/bin/libreoffice`)
+- `MAX_CONCURRENT_JOBS`: Maximum number of concurrent processing jobs (default: 3)
+- `JOB_TIMEOUT_SECONDS`: Maximum processing time per job (default: 300)
+
+## LibreOffice Requirements
+- LibreOffice must be installed on the server
+- Minimum version: 7.0+
+- For Windows: Ensure path includes `program` directory containing `soffice.exe`
+- For Linux: Typically `/usr/bin/libreoffice` or `/usr/bin/soffice`
+</file>
+
+<file path="docs/openapi.yaml">
+openapi: 3.1.0
+info:
+  title: PPTX Processor Microservice API
+  description: >
+    API for converting PowerPoint (PPTX) presentations to SVGs and extracting text data with positioning information.
+    This service is a critical component of the PowerPoint Translator App, enabling high-fidelity slide rendering
+    and text translation while maintaining visual fidelity.
+  version: 1.0.0
+  contact:
+    name: PowerPoint Translator App Team
+servers:
+  - url: https://api.pptx-processor.example.com/v1
+    description: Production server
+  - url: https://staging.pptx-processor.example.com/v1
+    description: Staging server
+  - url: http://localhost:8000/v1
+    description: Local development server
+
+tags:
+  - name: processing
+    description: PPTX processing operations
+  - name: status
+    description: Processing status operations
+  - name: health
+    description: Service health operations
+
+paths:
+  /process:
+    post:
+      tags:
+        - processing
+      summary: Process a PPTX file
+      description: Upload a PPTX file for processing, converting slides to SVGs and extracting text data
+      operationId: processPptx
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+                - sessionId
+                - supabaseUrl
+                - supabaseKey
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: The PPTX file to process
+                sessionId:
+                  type: string
+                  description: Unique identifier for the translation session
+                supabaseUrl:
+                  type: string
+                  description: The Supabase project URL for storing assets
+                supabaseKey:
+                  type: string
+                  description: The Supabase API key for authorization
+                sourceLanguage:
+                  type: string
+                  description: The source language of the presentation
+                targetLanguage:
+                  type: string
+                  description: The target language for translation
+                generateThumbnails:
+                  type: boolean
+                  description: Whether to generate slide thumbnails
+                  default: true
+      responses:
+        '202':
+          description: Processing started successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProcessingResponse'
+        '400':
+          description: Bad request - invalid file or parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized - invalid Supabase credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /process/batch:
+    post:
+      tags:
+        - processing
+      summary: Process multiple PPTX files
+      description: Upload multiple PPTX files for batch processing
+      operationId: processBatchPptx
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - files
+                - batchId
+                - supabaseUrl
+                - supabaseKey
+              properties:
+                files:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                  description: The PPTX files to process
+                batchId:
+                  type: string
+                  description: Unique identifier for the batch
+                sessionIds:
+                  type: array
+                  items:
+                    type: string
+                  description: Unique identifiers for each translation session
+                supabaseUrl:
+                  type: string
+                  description: The Supabase project URL for storing assets
+                supabaseKey:
+                  type: string
+                  description: The Supabase API key for authorization
+      responses:
+        '202':
+          description: Batch processing started successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchProcessingResponse'
+        '400':
+          description: Bad request - invalid files or parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized - invalid Supabase credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /status/{jobId}:
+    get:
+      tags:
+        - status
+      summary: Get processing status
+      description: Check the status of a processing job
+      operationId: getProcessingStatus
+      parameters:
+        - name: jobId
+          in: path
+          description: ID of the processing job
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Processing status retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProcessingStatus'
+        '404':
+          description: Job not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /results/{sessionId}:
+    get:
+      tags:
+        - status
+      summary: Get processing results
+      description: Retrieve the results of a completed processing job
+      operationId: getProcessingResults
+      parameters:
+        - name: sessionId
+          in: path
+          description: ID of the translation session
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Results retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProcessedPresentation'
+        '404':
+          description: Results not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /health:
+    get:
+      tags:
+        - health
+      summary: Check service health
+      description: Get the health status of the service
+      operationId: getHealthStatus
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+        '500':
+          description: Service is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  schemas:
+    ProcessingResponse:
+      type: object
+      required:
+        - jobId
+        - sessionId
+        - status
+        - message
+      properties:
+        jobId:
+          type: string
+          description: Unique identifier for the processing job
+        sessionId:
+          type: string
+          description: Unique identifier for the translation session
+        status:
+          type: string
+          enum: [queued, processing]
+          description: Current status of the processing job
+        message:
+          type: string
+          description: Informational message
+        estimatedCompletionTime:
+          type: string
+          format: date-time
+          description: Estimated time of completion
+
+    BatchProcessingResponse:
+      type: object
+      required:
+        - batchId
+        - jobs
+      properties:
+        batchId:
+          type: string
+          description: Unique identifier for the batch
+        jobs:
+          type: array
+          items:
+            type: object
+            properties:
+              jobId:
+                type: string
+                description: Unique identifier for the processing job
+              sessionId:
+                type: string
+                description: Unique identifier for the translation session
+              status:
+                type: string
+                enum: [queued, processing]
+                description: Current status of the processing job
+
+    ProcessingStatus:
+      type: object
+      required:
+        - jobId
+        - sessionId
+        - status
+        - progress
+      properties:
+        jobId:
+          type: string
+          description: Unique identifier for the processing job
+        sessionId:
+          type: string
+          description: Unique identifier for the translation session
+        status:
+          type: string
+          enum: [queued, processing, completed, failed]
+          description: Current status of the processing job
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Progress percentage of the processing job
+        currentStage:
+          type: string
+          description: Current processing stage
+        message:
+          type: string
+          description: Informational or error message
+        completedAt:
+          type: string
+          format: date-time
+          description: Time when processing completed (if status is completed)
+        error:
+          type: string
+          description: Error details (if status is failed)
+
+    ProcessedPresentation:
+      type: object
+      required:
+        - sessionId
+        - slideCount
+        - processingStatus
+        - slides
+      properties:
+        sessionId:
+          type: string
+          description: Unique identifier for the translation session
+        slideCount:
+          type: integer
+          description: Total number of slides in the presentation
+        processingStatus:
+          type: string
+          enum: [completed, partially_completed, failed]
+          description: Overall status of the processing
+        processingTime:
+          type: integer
+          description: Processing time in seconds
+        slides:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProcessedSlide'
+
+    ProcessedSlide:
+      type: object
+      required:
+        - slideId
+        - slideNumber
+        - svgUrl
+        - originalWidth
+        - originalHeight
+        - shapes
+      properties:
+        slideId:
+          type: string
+          description: Unique identifier for the slide
+        slideNumber:
+          type: integer
+          description: Slide number in the presentation (1-based)
+        svgUrl:
+          type: string
+          description: URL to the SVG representation of the slide
+        originalWidth:
+          type: integer
+          description: Original width of the slide in pixels
+        originalHeight:
+          type: integer
+          description: Original height of the slide in pixels
+        thumbnailUrl:
+          type: string
+          description: URL to a thumbnail image of the slide
+        shapes:
+          type: array
+          items:
+            $ref: '#/components/schemas/SlideShape'
+
+    SlideShape:
+      type: object
+      required:
+        - shapeId
+        - shapeType
+        - originalText
+        - xCoordinate
+        - yCoordinate
+        - width
+        - height
+        - coordinatesUnit
+      properties:
+        shapeId:
+          type: string
+          description: Unique identifier for the shape
+        shapeType:
+          type: string
+          enum: [text, table_cell, chart_text, smartart_text]
+          description: Type of the shape
+        originalText:
+          type: string
+          description: Original text content of the shape
+        xCoordinate:
+          type: number
+          format: float
+          description: X coordinate of the shape
+        yCoordinate:
+          type: number
+          format: float
+          description: Y coordinate of the shape
+        width:
+          type: number
+          format: float
+          description: Width of the shape
+        height:
+          type: number
+          format: float
+          description: Height of the shape
+        coordinatesUnit:
+          type: string
+          enum: [percentage, px]
+          description: Unit of the coordinates (percentage of slide or pixels)
+        fontSize:
+          type: number
+          format: float
+          description: Font size of the text
+        fontFamily:
+          type: string
+          description: Font family of the text
+        fontWeight:
+          type: string
+          description: Font weight of the text (normal, bold)
+        fontStyle:
+          type: string
+          description: Font style of the text (normal, italic)
+        color:
+          type: string
+          description: Color of the text in hex format
+        readingOrder:
+          type: integer
+          description: Reading order of the text element (1-based)
+        parentId:
+          type: string
+          description: ID of the parent shape (for grouped elements)
+
+    HealthStatus:
+      type: object
+      required:
+        - status
+        - version
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+          description: Overall health status of the service
+        version:
+          type: string
+          description: Version of the service
+        uptime:
+          type: number
+          description: Service uptime in seconds
+        components:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              status:
+                type: string
+                enum: [healthy, degraded, unhealthy]
+              message:
+                type: string
+
+    Error:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          description: Error code
+        message:
+          type: string
+          description: Error message
+        details:
+          type: object
+          description: Additional error details
+</file>
+
+<file path="docs/PRD.md">
+# PPTX Processor Microservice - Product Requirements Document
+
+## 1. Introduction
+
+### 1.1 Purpose
+This document outlines the requirements for a Python-based microservice responsible for converting PowerPoint (PPTX) presentations to SVGs and extracting text data with positioning information. This service is a critical component of the PowerPoint Translator App, enabling high-fidelity slide rendering and text translation while maintaining visual fidelity.
+
+### 1.2 Scope
+The PPTX Processor Microservice will:
+- Receive and process PPTX files
+- Convert individual slides to SVG images
+- Extract text elements with their coordinates, styles, and other metadata
+- Return structured data that integrates with the frontend SlideCanvas component
+- Store generated assets in Supabase Storage
+
+### 1.3 Definitions
+- **PPTX**: Microsoft PowerPoint Open XML Presentation file format
+- **SVG**: Scalable Vector Graphics, an XML-based vector image format
+- **Text Element**: A discrete text shape or text box within a PowerPoint slide
+- **SlideCanvas**: The frontend React component that displays slides and overlays interactive elements
+
+## 2. Product Overview
+
+### 2.1 Product Perspective
+The PPTX Processor Microservice is a standalone service that integrates with the PowerPoint Translator App's frontend. It serves as the backend processing engine that enables the core functionality of high-fidelity slide rendering and text extraction for translation.
+
+### 2.2 User Classes and Characteristics
+This microservice does not have direct users but serves the PowerPoint Translator App, which is used by:
+- Business professionals preparing multilingual presentations
+- Marketing teams localizing campaign materials
+- Educational institutions creating content for diverse audiences
+- Translation agencies and freelance translators
+
+### 2.3 Operating Environment
+- Python-based microservice deployable as a containerized application
+- Stateless architecture for horizontal scalability
+- Cloud-agnostic design with initial deployment on a suitable cloud platform
+
+## 3. Requirements
+
+### 3.1 Functional Requirements
+
+#### 3.1.1 PPTX Processing
+- **FR1.1**: Accept PPTX files via HTTP POST requests
+- **FR1.2**: Validate incoming PPTX files for format correctness and security
+- **FR1.3**: Support batch processing of multiple PPTX files
+- **FR1.4**: Handle PPTX files of varying sizes (up to 50MB initially)
+
+#### 3.1.2 Slide Conversion
+- **FR2.1**: Convert each slide in a PPTX to a high-fidelity SVG image
+- **FR2.2**: Preserve all visual elements including images, shapes, charts, and special effects
+- **FR2.3**: Maintain original slide dimensions and aspect ratio
+- **FR2.4**: Optimize SVG output for web display while maintaining quality
+
+#### 3.1.3 Text Extraction
+- **FR3.1**: Extract all text elements from each slide
+- **FR3.2**: Capture text content for each text element
+- **FR3.3**: Determine precise coordinates (x, y, width, height) for each text element
+- **FR3.4**: Extract basic styling information (font, size, color, bold, italic, etc.)
+- **FR3.5**: Preserve text hierarchy and reading order
+- **FR3.6**: Handle special characters and non-Latin scripts
+- **FR3.7**: Support text extraction from tables, charts, and SmartArt
+
+#### 3.1.4 Data Storage and Retrieval
+- **FR4.1**: Upload generated SVGs to Supabase Storage
+- **FR4.2**: Generate unique, consistent file paths for all assets
+- **FR4.3**: Return structured data with references to stored assets
+- **FR4.4**: Support asynchronous processing with status updates
+
+### 3.2 Non-Functional Requirements
+
+#### 3.2.1 Performance
+- **NFR1.1**: Process a typical 30-slide presentation in under 2 minutes
+- **NFR1.2**: Support concurrent processing of multiple presentations
+- **NFR1.3**: Optimize memory usage for handling large presentations
+
+#### 3.2.2 Reliability
+- **NFR2.1**: Achieve 99.9% uptime
+- **NFR2.2**: Implement comprehensive error handling and recovery mechanisms
+- **NFR2.3**: Provide detailed error reporting
+
+#### 3.2.3 Security
+- **NFR3.1**: Implement secure file handling practices
+- **NFR3.2**: Sanitize all content to prevent XSS and other security vulnerabilities
+- **NFR3.3**: Ensure secure communication with external services
+
+#### 3.2.4 Scalability
+- **NFR4.1**: Design for horizontal scalability
+- **NFR4.2**: Support auto-scaling based on workload
+
+## 4. Data Requirements
+
+### 4.1 Input Data
+- PPTX files
+- Processing configuration parameters (session ID, output preferences)
+- Authentication information for Supabase access
+
+### 4.2 Output Data
+The service will output structured JSON data including:
+
+```json
+{
+  "session_id": "string",
+  "slide_count": "integer",
+  "processing_status": "string",
+  "slides": [
+    {
+      "slide_id": "string",
+      "slide_number": "integer",
+      "svg_url": "string",
+      "original_width": "integer",
+      "original_height": "integer",
+      "thumbnail_url": "string",
+      "shapes": [
+        {
+          "shape_id": "string",
+          "shape_type": "string",
+          "original_text": "string",
+          "x_coordinate": "float",
+          "y_coordinate": "float",
+          "width": "float",
+          "height": "float",
+          "coordinates_unit": "string",
+          "font_size": "float",
+          "font_family": "string",
+          "font_weight": "string",
+          "font_style": "string",
+          "color": "string",
+          "reading_order": "integer"
+        }
+      ]
+    }
+  ]
+}
+```
+
+## 5. External Interfaces
+
+### 5.1 User Interfaces
+This microservice does not have a direct user interface. It operates as a REST API.
+
+### 5.2 Hardware Interfaces
+No specific hardware interfaces required beyond standard server infrastructure.
+
+### 5.3 Software Interfaces
+- **SI1**: Supabase Storage API for storing SVGs and other assets
+- **SI2**: HTTP/REST API for receiving requests and returning processed data
+- **SI3**: Logging and monitoring interfaces for operational visibility
+
+## 6. Technical Requirements
+
+### 6.1 Technology Stack
+- **Python**: Core programming language
+- **FastAPI**: API framework for building the microservice
+- **python-pptx**: For parsing PPTX files
+- **CairoSVG/Inkscape/LibreOffice**: For rendering slides to SVG
+- **Docker**: For containerization
+- **Supabase SDK**: For integrating with Supabase Storage
+- **Uvicorn/Gunicorn**: ASGI servers for production deployment
+
+### 6.2 Development Environment
+- Modern Python environment (Python 3.10+)
+- Docker for containerization
+- Automated testing framework
+- CI/CD pipeline
+
+## 7. Implementation Strategy
+
+### 7.1 Phased Approach
+1. **Phase 1**: Core PPTX parsing and SVG conversion
+2. **Phase 2**: Text extraction with basic positioning
+3. **Phase 3**: Advanced styling and special element handling
+4. **Phase 4**: Performance optimization and scaling
+
+### 7.2 Integration Points
+- **Frontend**: The service will be called by the Next.js frontend via the `/api/process-pptx` route
+- **Storage**: Generated SVGs will be stored in Supabase Storage
+- **Database**: Slide and shape metadata will be structured for insertion into the PowerPoint Translator App's database
+
+## 8. Constraints and Assumptions
+
+### 8.1 Constraints
+- Limited ability to perfectly convert all PowerPoint features to SVG
+- Processing time proportional to presentation complexity
+- Dependency on external libraries for PPTX parsing and rendering
+
+### 8.2 Assumptions
+- PPTX files follow standard Microsoft Office format
+- Supabase Storage is available and properly configured
+- Network bandwidth is sufficient for transferring files
+
+## 9. Acceptance Criteria
+1. Successfully converts at least 95% of standard PowerPoint elements to SVG
+2. Accurately extracts text with positioning from at least 98% of text elements
+3. Meets performance requirements for typical presentations
+4. Output format integrates seamlessly with the SlideCanvas component
+5. Robust error handling with clear error messages
+
+## 10. Appendices
+
+### 10.1 Glossary
+- **PPTX**: Microsoft PowerPoint Open XML Presentation format
+- **SVG**: Scalable Vector Graphics
+- **API**: Application Programming Interface
+- **JSON**: JavaScript Object Notation
+- **REST**: Representational State Transfer
+
+### 10.2 References
+- Microsoft PowerPoint Open XML Specification
+- SVG W3C Specification
+- Supabase Storage API Documentation
+</file>
+
+<file path="env.example">
+# Server Configuration
+API_ENV=development
+API_PORT=8000
+API_HOST=0.0.0.0
+LOG_LEVEL=INFO  # Options: DEBUG, INFO, WARNING, ERROR
+
+# Storage paths - Using relative paths for Windows compatibility
+TEMP_UPLOAD_DIR=./tmp/uploads
+TEMP_PROCESSING_DIR=./tmp/processing
+
+# Supabase Configuration (REQUIRED)
+# These credentials are used for storing processed assets and results
+SUPABASE_URL="http://127.0.0.1:54321"  # For local Supabase: http://127.0.0.1:54321
+SUPABASE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0"  # For local Supabase: use anon key
+SUPABASE_STORAGE_BUCKET=slide-visuals  # Storage bucket for slides and thumbnails
+
+# Security
+ALLOWED_ORIGINS=http://localhost:3000  # Comma-separated list of allowed origins
+
+# Optional: Path to LibreOffice soffice executable for higher fidelity SVG conversion
+# Example for Windows: LIBREOFFICE_PATH="C:/Program Files/LibreOffice/program/soffice.exe"
+# Example for Linux: LIBREOFFICE_PATH="/usr/bin/libreoffice"
+# Example for macOS: LIBREOFFICE_PATH="/Applications/LibreOffice.app/Contents/MacOS/soffice"
+LIBREOFFICE_PATH=""  # If not set, will use fallback SVG generation method
+</file>
+
+<file path="fix-env-guide.md">
+# How to Fix Your .env File
+
+The issue with "Invalid API key" is caused by having line breaks in your Supabase API key in the .env file.
+
+## Steps to Fix
+
+1. Open your `.env` file
+2. Find the `SUPABASE_KEY` line
+3. Replace the multi-line key with a single-line version:
+
+```
+# WRONG (has line breaks):
+SUPABASE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6
+ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0"
+
+# CORRECT (single line):
+SUPABASE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0"
+```
+
+4. Save the file
+5. Restart the server
+
+## Why This Works
+
+JWT tokens (like your Supabase key) must be in a specific format with no line breaks. The API expects a continuous string.
+
+## Code Fix
+
+I've already updated the `supabase_service.py` file to properly handle the API key by:
+1. Removing whitespace and newlines
+2. Removing any surrounding quotes
+
+This change should make your app more robust, but fixing the .env file is still recommended for better maintainability.
+</file>
+
+<file path="job_status/14522686-e370-45ff-bfba-5cf0b5b195e1.json">
+{"job_id":"14522686-e370-45ff-bfba-5cf0b5b195e1","session_id":"221022","status":"failed","progress":0,"current_stage":"Processing failed","message":null,"completed_at":null,"error":"type object 'MSO_VERTICAL_ANCHOR' has no attribute 'TOP_CENTERED'"}
+</file>
+
+<file path="job_status/565da0d4-e655-47dd-a03e-f05644e3fd53.json">
+{"job_id":"565da0d4-e655-47dd-a03e-f05644e3fd53","session_id":"221022","status":"failed","progress":0,"current_stage":"Processing failed","message":null,"completed_at":null,"error":"Failed to upload file to Supabase: {'statusCode': 403, 'error': Unauthorized, 'message': new row violates row-level security policy}"}
+</file>
+
+<file path="job_status/7089e0e2-d9a7-440b-ba7a-abe219fe477c.json">
+{"job_id":"7089e0e2-d9a7-440b-ba7a-abe219fe477c","session_id":"221022","status":"failed","progress":0,"current_stage":"Processing failed","message":null,"completed_at":null,"error":"Failed to upload file to Supabase: {'statusCode': 403, 'error': Unauthorized, 'message': new row violates row-level security policy}"}
+</file>
+
+<file path="job_status/af5c6527-852f-4028-b5a9-29b635ed9b2b.json">
+{"job_id":"af5c6527-852f-4028-b5a9-29b635ed9b2b","session_id":"2210","status":"failed","progress":0,"current_stage":"Processing failed","message":null,"completed_at":null,"error":"'Slide' object has no attribute 'slide_width'"}
+</file>
+
+<file path="job_status/fab1af29-fa68-43a1-8f53-ad8fee2d22d1.json">
+{"job_id":"fab1af29-fa68-43a1-8f53-ad8fee2d22d1","session_id":"221022","status":"failed","progress":0,"current_stage":"Processing failed","message":null,"completed_at":null,"error":"Failed to upload file to Supabase: {'statusCode': 403, 'error': Unauthorized, 'message': new row violates row-level security policy}"}
+</file>
+
+<file path="key.txt">
+SUPABASE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0"
+</file>
+
+<file path="main.py">
+import uvicorn
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+import logging
+import os
+
+# Import routes
+from app.api.routes.health import router as health_router
+from app.api.routes.status import router as status_router
+from app.api.routes.processing import router as processing_router
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[logging.StreamHandler()]
+)
+
+logger = logging.getLogger(__name__)
+
+# Create FastAPI app
+app = FastAPI(
+    title="PPTX Processor Service",
+    description="A service to convert PPTX to SVG and extract text with positioning",
+    version="0.1.0"
+)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, you'd want to restrict this
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Include routers
+app.include_router(health_router, prefix="/health", tags=["health"])
+app.include_router(status_router, prefix="/status", tags=["status"])
+app.include_router(processing_router, prefix="/api", tags=["processing"])
+
+# Add exception handlers
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request, exc):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+    )
+
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request, exc):
+    logger.error(f"Unhandled exception: {str(exc)}")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+    )
+
+
+def main():
+    """Run the application with uvicorn"""
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", 8000)),
+        reload=True
+    )
+
+
+if __name__ == "__main__":
+    main()
+</file>
+
+<file path="pyproject.toml">
+[project]
+name = "pptx-processor-service"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "aiofiles>=23.2.1",
+    "cairosvg>=2.7.0",
+    "celery>=5.3.4",
+    "fastapi>=0.103.1",
+    "httpx>=0.25.0",
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+    "pillow>=10.0.0",
+    "prometheus-client>=0.17.1",
+    "psutil>=5.9.0",
+    "pydantic>=2.4.2",
+    "pydantic-settings>=2.0.3",
+    "pytest>=7.4.2",
+    "python-dotenv>=1.0.0",
+    "python-multipart>=0.0.6",
+    "python-pptx>=0.6.21",
+    "redis>=5.0.0",
+    "reportlab>=4.0.4",
+    "requests>=2.32.3",
+    "storage3>=0.5.4",
+    "supabase>=1.0.3",
+    "tenacity>=8.2.3",
+    "uvicorn>=0.23.2",
+]
+</file>
+
+<file path="requirements.txt">
+# Core dependencies
+fastapi>=0.103.1
+uvicorn>=0.23.2
+python-multipart>=0.0.6
+pydantic>=2.4.2
+pydantic-settings>=2.0.3
+psutil>=5.9.0
+requests>=2.32.3
+
+# PPTX processing
+python-pptx>=0.6.21
+pillow>=10.0.0
+
+# Supabase integration
+supabase>=1.0.3
+storage3>=0.5.4
+
+# Utils
+python-dotenv>=1.0.0
+tenacity>=8.2.3
+aiofiles>=23.2.1
+
+# Logging and monitoring
+prometheus-client>=0.17.1
+opentelemetry-api>=1.20.0
+opentelemetry-sdk>=1.20.0
+
+# Testing
+pytest>=7.4.2
+httpx>=0.25.0
+</file>
+
+<file path="STORAGE_SETUP.md">
+# Supabase Storage Setup
+
+Since storage bucket creation requires special permissions, you need to set up storage buckets manually through the Supabase Studio UI.
+
+## Steps to Setup Storage Buckets
+
+1. **Open Supabase Studio**
+   - Go to http://127.0.0.1:54323
+   - Login if required (default credentials for local development)
+
+2. **Navigate to Storage**
+   - Click on "Storage" in the left sidebar
+
+3. **Create Required Buckets**
+   
+   Create the following buckets:
+   
+   a. **slide-visuals**
+      - Click "New bucket"
+      - Name: `slide-visuals`
+      - Public bucket: ✓ (check this)
+      - Click "Create bucket"
+   
+   b. **processing-results**
+      - Click "New bucket"
+      - Name: `processing-results`
+      - Public bucket: ✓ (check this)
+      - Click "Create bucket"
+
+4. **Configure Bucket Policies (Optional for Development)**
+   
+   For development, public buckets should work fine. For production, you may want to add RLS policies:
+   
+   - Click on the bucket name
+   - Go to "Policies" tab
+   - Add appropriate policies based on your security requirements
+
+## Alternative: Disable RLS for Storage (Development Only)
+
+If you're still having issues with storage uploads, you can run this SQL in the SQL Editor:
+
+```sql
+-- WARNING: Only for local development!
+-- This gives unrestricted access to storage
+CREATE POLICY "Allow public access" ON storage.objects
+  FOR ALL USING (true) WITH CHECK (true);
+```
+
+## Verifying Storage Setup
+
+After creating the buckets, your application should be able to:
+- Upload SVG files to `slide-visuals`
+- Upload result JSON files to `processing-results`
+- Generate public URLs for uploaded files
+
+The application will automatically handle file uploads once the buckets exist.
+</file>
+
+<file path="supabase_setup.sql">
+-- Health check table
+CREATE TABLE IF NOT EXISTS health_check (
+  id SERIAL PRIMARY KEY
+);
+
+-- Translation sessions table
+CREATE TABLE IF NOT EXISTS translation_sessions (
+  id TEXT PRIMARY KEY,
+  status TEXT NOT NULL,
+  slide_count INTEGER,
+  result_url TEXT,
+  error TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Slides table
+CREATE TABLE IF NOT EXISTS slides (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  session_id TEXT REFERENCES translation_sessions(id),
+  slide_number INTEGER NOT NULL,
+  svg_url TEXT NOT NULL,
+  original_width INTEGER NOT NULL,
+  original_height INTEGER NOT NULL,
+  thumbnail_url TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Slide shapes table
+CREATE TABLE IF NOT EXISTS slide_shapes (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  slide_id UUID REFERENCES slides(id),
+  shape_id TEXT NOT NULL,
+  shape_type TEXT NOT NULL,
+  x_coordinate FLOAT NOT NULL,
+  y_coordinate FLOAT NOT NULL,
+  width FLOAT NOT NULL,
+  height FLOAT NOT NULL,
+  coordinates_unit TEXT NOT NULL,
+  reading_order INTEGER NOT NULL,
+  original_text TEXT,
+  font_size FLOAT,
+  font_family TEXT,
+  font_weight TEXT,
+  font_style TEXT,
+  color TEXT,
+  text_align TEXT,
+  vertical_anchor TEXT,
+  line_spacing FLOAT,
+  image_content_type TEXT,
+  image_base64 TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Disable RLS on tables for development (enable and add policies for production)
+ALTER TABLE health_check DISABLE ROW LEVEL SECURITY;
+ALTER TABLE translation_sessions DISABLE ROW LEVEL SECURITY;
+ALTER TABLE slides DISABLE ROW LEVEL SECURITY;
+ALTER TABLE slide_shapes DISABLE ROW LEVEL SECURITY;
+
+-- Note: For production, replace DISABLE with ENABLE and add proper policies:
+-- ALTER TABLE health_check ENABLE ROW LEVEL SECURITY;
+-- CREATE POLICY "Allow all operations" ON health_check FOR ALL USING (true) WITH CHECK (true);
+</file>
+
+<file path="tests/conftest.py">
+import pytest
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
+from app.core.config import get_settings, Settings
+from fastapi.testclient import TestClient
+from main import app
+
+
+@pytest.fixture
+def test_settings():
+    """Mock application settings for testing."""
+    return Settings(
+        API_ENV="test",
+        TEMP_UPLOAD_DIR="./tmp/test_uploads",
+        TEMP_PROCESSING_DIR="./tmp/test_processing",
+        SUPABASE_URL="http://fake-supabase-url.com",
+        SUPABASE_KEY="fake-supabase-key",
+        SUPABASE_STORAGE_BUCKET="test-bucket",
+        PROJECT_VERSION="1.0.0-test",
+        LIBREOFFICE_PATH=None,  # No LibreOffice for tests
+    )
+
+
+@pytest.fixture
+def mock_settings(test_settings):
+    """Patch the get_settings function to return test settings."""
+    with patch("app.core.config.get_settings", return_value=test_settings):
+        yield test_settings
+
+
+@pytest.fixture
+def test_client(mock_settings):
+    """Create a FastAPI TestClient with mocked settings."""
+    with TestClient(app) as client:
+        yield client
+
+
+@pytest.fixture
+def mock_supabase_client():
+    """Create a mock Supabase client."""
+    mock_client = MagicMock()
+
+    # Mock storage
+    mock_client.storage = MagicMock()
+    mock_client.storage.list_buckets = MagicMock(
+        return_value=[{"name": "test-bucket"}])
+    mock_client.storage.from_ = MagicMock()
+    mock_client.storage.from_().upload = MagicMock(
+        return_value={"Key": "test-file.svg"})
+    mock_client.storage.from_().get_public_url = MagicMock(
+        return_value="https://fake-supabase.com/storage/test-bucket/test-file.svg")
+
+    # Mock database
+    mock_client.table = MagicMock()
+    mock_client.table().insert = MagicMock()
+    mock_client.table().insert().execute = MagicMock(
+        return_value=MagicMock(data=[{"id": "test-id"}]))
+    mock_client.table().update = MagicMock()
+    mock_client.table().update().eq = MagicMock()
+    mock_client.table().update().eq().execute = MagicMock()
+
+    return mock_client
+
+
+@pytest.fixture
+def mock_supabase_service(mock_supabase_client):
+    """Patch the Supabase service functions."""
+    with patch("app.services.supabase_service._create_supabase_client", return_value=mock_supabase_client), \
+            patch("app.services.supabase_service.check_supabase_connection", return_value=True), \
+            patch("app.services.supabase_service.validate_supabase_credentials", return_value=True):
+        yield
+
+
+@pytest.fixture
+def event_loop():
+    """Create an instance of the default event loop for each test."""
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+    yield loop
+    loop.close()
+</file>
+
+<file path="tests/unit/api/test_health.py">
+import pytest
+from fastapi.testclient import TestClient
+from unittest.mock import patch, MagicMock
+
+
+def test_health_endpoint_success(test_client, mock_supabase_service):
+    """Test that the health endpoint returns 200 OK when all systems are healthy."""
+    # Mock psutil for system info
+    with patch("psutil.cpu_percent", return_value=10.0), \
+            patch("psutil.virtual_memory", return_value=MagicMock(percent=50.0)), \
+            patch("psutil.disk_usage", return_value=MagicMock(percent=30.0)):
+
+        response = test_client.get("/health/health")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "healthy"
+
+        # Check components
+        assert data["components"]["system"]["status"] == "healthy"
+        assert data["components"]["supabase"]["status"] == "healthy"
+        assert data["components"]["storage"]["status"] == "healthy"
+
+        # Check metrics format
+        assert "CPU:" in data["components"]["system"]["message"]
+        assert "Memory:" in data["components"]["system"]["message"]
+        assert "Disk:" in data["components"]["system"]["message"]
+
+
+def test_health_endpoint_supabase_failure(test_client):
+    """Test that the health endpoint returns 500 when Supabase is unhealthy."""
+    # Mock psutil and supabase connection check (failed)
+    with patch("psutil.cpu_percent", return_value=10.0), \
+            patch("psutil.virtual_memory", return_value=MagicMock(percent=50.0)), \
+            patch("psutil.disk_usage", return_value=MagicMock(percent=30.0)), \
+            patch("app.services.supabase_service.check_supabase_connection", return_value=False):
+
+        response = test_client.get("/health/health")
+
+        assert response.status_code == 500
+        data = response.json()
+        assert data["status"] == "unhealthy"
+        assert data["components"]["supabase"]["status"] == "unhealthy"
+        assert data["components"]["system"]["status"] == "healthy"
+        assert data["components"]["storage"]["status"] == "healthy"
+
+
+def test_health_endpoint_storage_failure(test_client, mock_supabase_service):
+    """Test that the health endpoint returns 500 when storage is unhealthy."""
+    # Mock psutil and os.access for storage (failed)
+    with patch("psutil.cpu_percent", return_value=10.0), \
+            patch("psutil.virtual_memory", return_value=MagicMock(percent=50.0)), \
+            patch("psutil.disk_usage", return_value=MagicMock(percent=30.0)), \
+            patch("os.access", return_value=False):
+
+        response = test_client.get("/health/health")
+
+        assert response.status_code == 500
+        data = response.json()
+        assert data["status"] == "unhealthy"
+        assert data["components"]["storage"]["status"] == "unhealthy"
+        assert data["components"]["system"]["status"] == "healthy"
+        assert data["components"]["supabase"]["status"] == "healthy"
+</file>
+
+<file path="tests/unit/services/test_supabase_service.py">
+import pytest
+import os
+from unittest.mock import patch, MagicMock
+from app.services.supabase_service import (
+    _normalize_supabase_url,
+    _create_supabase_client,
+    check_supabase_connection,
+    validate_supabase_credentials,
+    upload_file_to_supabase
+)
+
+
+def test_normalize_supabase_url():
+    """Test the URL normalization function."""
+    # Test with no scheme
+    assert _normalize_supabase_url("example.com") == "http://example.com"
+
+    # Test with scheme
+    assert _normalize_supabase_url(
+        "https://example.com") == "https://example.com"
+
+    # Test with trailing slash
+    assert _normalize_supabase_url(
+        "https://example.com/") == "https://example.com"
+
+    # Test with path
+    assert _normalize_supabase_url(
+        "https://example.com/api/") == "https://example.com/api"
+
+    # Test with empty URL
+    assert _normalize_supabase_url("") == ""
+
+
+@pytest.mark.asyncio
+async def test_check_supabase_connection_success(mock_supabase_client):
+    """Test successful Supabase connection check."""
+    with patch("app.services.supabase_service._create_supabase_client", return_value=mock_supabase_client):
+        result = await check_supabase_connection()
+        assert result is True
+
+
+@pytest.mark.asyncio
+async def test_check_supabase_connection_failure():
+    """Test failed Supabase connection check."""
+    with patch("app.services.supabase_service._create_supabase_client", side_effect=Exception("Connection error")):
+        result = await check_supabase_connection()
+        assert result is False
+
+
+@pytest.mark.asyncio
+async def test_validate_supabase_credentials_success(mock_supabase_client):
+    """Test successful Supabase credentials validation."""
+    with patch("app.services.supabase_service._create_supabase_client", return_value=mock_supabase_client), \
+            patch("app.services.supabase_service.create_client", return_value=mock_supabase_client):
+        result = await validate_supabase_credentials("http://example.com", "fake-key")
+        assert result is True
+
+
+@pytest.mark.asyncio
+async def test_validate_supabase_credentials_failure():
+    """Test failed Supabase credentials validation."""
+    with patch("app.services.supabase_service.create_client", side_effect=Exception("Invalid credentials")):
+        with pytest.raises(Exception) as excinfo:
+            await validate_supabase_credentials("http://example.com", "fake-key")
+        assert "Invalid Supabase credentials" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_upload_file_to_supabase(mock_supabase_client, tmp_path):
+    """Test uploading a file to Supabase storage."""
+    # Create a test file
+    test_file = tmp_path / "test.txt"
+    test_file.write_text("test content")
+
+    # Mock the supabase client
+    with patch("app.services.supabase_service._create_supabase_client", return_value=mock_supabase_client):
+        url = await upload_file_to_supabase(
+            file_path=str(test_file),
+            bucket="test-bucket",
+            destination_path="test/test.txt"
+        )
+
+        # Verify the URL is returned
+        assert url == "https://fake-supabase.com/storage/test-bucket/test-file.svg"
+
+        # Verify that the client was called correctly
+        mock_supabase_client.storage.from_.assert_called_once_with(
+            "test-bucket")
+
+
+def test_create_supabase_client_cleans_input():
+    """Test that create_supabase_client properly cleans inputs."""
+    with patch("app.services.supabase_service.create_client", return_value=MagicMock()) as mock_create:
+        # Test with comments and quotes
+        _create_supabase_client(
+            supabase_url='"http://example.com" # comment',
+            supabase_key='"fake-key" # comment'
+        )
+
+        # Check that create_client was called with cleaned values
+        mock_create.assert_called_once()
+        args, _ = mock_create.call_args
+        assert args[0] == "http://example.com"  # URL is cleaned
+        assert args[1] == "fake-key"  # Key is cleaned
+</file>
+
+<file path=".cursorrules">
+# Cursor Rules for PPTX Processor Service
+
+## Project Patterns
+
+### Code Organization
+- Follow FastAPI project structure with clear module separation
+- Keep API routes in app/api/routes/
+- Core business logic in app/services/
+- Data models in app/models/
+- Configuration in app/core/
+
+### Coding Standards
+- Use type hints consistently
+- Follow PEP 8 style guidelines
+- Document functions and classes with docstrings
+- Use async/await for I/O-bound operations
+
+### Dependency Management
+- Use UV instead of pip for package management
+- Keep requirements.txt updated with explicit versions
+- Use python-dotenv for environment variables
+- Avoid heavy dependencies when simpler alternatives exist
+
+### Testing
+- Write tests for all business logic (when needed)
+- Use pytest for testing framework
+- Use httpx for API testing
+
+## User Preferences
+- Use memory bank for tracking project knowledge
+- Update memory bank when making significant changes
+- Document design decisions and architecture changes
+- Keep solutions simple and working - avoid overengineering
+- Focus on functionality over complex architecture
+
+## Tool Usage
+- UV for package management: `uv pip install -r requirements.txt`
+- FastAPI for API development
+- Uvicorn for running the development server
+- python-pptx for PPTX parsing
+- Avoid Cairo-based libraries on Windows
+
+## Critical Paths
+- PPTX processing and conversion to SVG
+- Text extraction with positioning
+- Supabase integration for storage
+- Metadata generation for frontend slidecanvas component
+
+## Known Issues and Solutions
+
+### 1. Slide Dimensions
+- Use `presentation.slide_width` NOT `slide.slide_width`
+- Access via: `slide.part.package.presentation_part.presentation`
+
+### 2. MSO_VERTICAL_ANCHOR Values
+- Only use: TOP, MIDDLE, BOTTOM
+- Do NOT use: TOP_CENTERED, MIDDLE_CENTERED, BOTTOM_CENTERED (don't exist)
+
+### 3. Supabase Storage RLS
+- For development: Disable RLS on tables
+- Create buckets manually in Supabase Studio
+- Use public buckets for development
+
+### 4. LibreOffice on Windows
+- Path example: "C:/Program Files/LibreOffice/program/soffice.exe"
+- If not working, fallback to ElementTree SVG generation
+- Check stderr for debug info
+
+### 5. URL Validation
+- Always normalize Supabase URLs (add http:// if missing)
+- Use urllib.parse for URL normalization
+
+## Current State (as of last update)
+1. **Working**: Basic PPTX to SVG conversion with ElementTree fallback
+2. **Working**: Supabase storage integration
+3. **Working**: Job tracking and retry mechanism
+4. **Issue**: LibreOffice SVG generation not producing output on Windows
+5. **Fixed**: Slide dimensions access, MSO_VERTICAL_ANCHOR enums, URL validation
+
+## Development Workflow
+1. Run Supabase locally: `supabase start`
+2. Apply database schema: Run supabase_setup.sql in SQL Editor
+3. Create storage buckets manually in Supabase Studio
+4. Start API: `uvicorn main:app --reload`
+5. Test at http://localhost:8000/docs
+
+## Debugging Tips
+1. Check logs for detailed error messages
+2. Verify Supabase connection at /health/health endpoint
+3. Use fallback SVG generation if LibreOffice fails
+4. For RLS errors, check bucket/table policies in Supabase Studio
+5. For file not found errors, check the cleanup logic in process_pptx
+</file>
+
+<file path="memory-bank/productContext.md">
+# Product Context
+
+## Problem Statement
+When translating PowerPoint presentations, traditional methods often break the layout or lose visual fidelity. Content positioning, formatting, and slide design are frequently compromised, making the translated presentation look unprofessional and difficult to read.
+
+## Solution
+The PPTX Processor Service enables high-quality translation of PowerPoint presentations by:
+
+1. Converting slides to SVG format that preserves all visual elements exactly
+2. Extracting text with precise positioning data
+3. Enabling text-only translation while maintaining the original slide design
+4. Supporting a seamless integration with the PowerPoint Translator App frontend
+
+## How It Works
+1. **Input**: User uploads PPTX file or provides Supabase storage reference
+2. **Processing**: Service converts each slide to SVG and extracts text metadata
+3. **Output**: Returns SVGs and text positioning data to frontend
+4. **Frontend**: SlideCanvas component displays SVG with overlaid translatable text
+5. **Translation**: User translates text while visual layout remains intact
+
+## User Experience Goals
+- Provide a seamless experience for translating PowerPoint presentations
+- Maintain perfect visual fidelity in translated slides
+- Ensure text positioning and styling remain intact after translation
+- Enable fast processing times to minimize user waiting
+- Support progress tracking for large presentations
+
+## Target Users
+- Content creators needing to translate presentations for international audiences
+- Education professionals creating multilingual course materials
+- Businesses presenting to global stakeholders
+- Government agencies with multilingual communication requirements
+
+## Technical Integration
+- **Frontend Component**: SlideCanvas expects SVG + text metadata
+- **Data Format**: Structured JSON with text positions, styles, and content
+- **Storage**: Optional Supabase integration for asset persistence
+- **Processing**: Direct API calls for immediate results
+
+## Current Implementation Gap
+- **Expected**: Working PPTX to SVG conversion with text extraction
+- **Actual**: Mock implementation that generates placeholder SVGs
+- **Impact**: Cannot be used for actual translation workflows yet
+
+## Business Value
+- Enables professional-quality presentation translation
+- Saves significant time compared to manual translation and reformatting
+- Provides consistent quality across all translated slides
+- Removes technical barriers to creating multilingual presentations
+
+## Simplified Requirements
+Based on user feedback, the focus is on:
+- Getting a working implementation quickly
+- Avoiding complex infrastructure (no Redis/Celery)
+- Windows compatibility for development
+- Direct integration with frontend components
+- No need for extensive security or testing initially
+</file>
+
+<file path="memory-bank/projectbrief.md">
+# PPTX Processor Microservice - Project Brief
+
+## Project Purpose
+A Python-based microservice for converting PowerPoint (PPTX) presentations to SVGs and extracting text data with positioning information. This service is a critical component of the PowerPoint Translator App, enabling high-fidelity slide rendering and text translation while maintaining visual fidelity.
+
+## Core Requirements (Clarified)
+1. Accept PPTX files from frontend or retrieve from Supabase storage
+2. Convert PPTX slides to SVG format (one SVG per slide)
+3. Extract text elements with precise coordinates and styling information
+4. Generate metadata for text display in slidecanvas frontend component
+5. Store processed assets in Supabase Storage (optional)
+6. Return structured data for frontend translation interface
+7. Simple, working implementation without unnecessary complexity
+
+## User Requirements
+- **Primary Goal**: Enable PPTX text translation in frontend
+- **Input**: PPTX file (from upload or Supabase)
+- **Output**: SVG per slide + text metadata for translation
+- **Complexity**: Keep it simple - no security, no complex testing, just working functionality
+- **Platform**: Must work on Windows development environment
+
+## Tech Stack (Revised)
+- **FastAPI**: Web framework for API endpoints ✓
+- **Python-PPTX**: Library for parsing PowerPoint files ✓
+- **SVG Generation**: Custom implementation (not CairoSVG due to Windows issues)
+- **Supabase**: Storage for assets (optional for basic functionality)
+- **UV**: Package management tool ✓
+- **No Celery/Redis**: Simplified architecture without task queue
+
+## Current State
+- **Structure**: Well-organized FastAPI application ✓
+- **Dependencies**: Installed but Cairo issue on Windows ❌
+- **Core Feature**: Mock implementation only, needs real conversion ❌
+- **Architecture**: Overly complex with unnecessary dependencies ⚠️
+
+## Success Criteria
+1. Application runs on Windows without dependency issues
+2. Can process real PPTX files and generate actual SVGs
+3. Extracts text with accurate positioning for frontend
+4. Returns metadata in format compatible with slidecanvas component
+5. Simple to run and test locally
+
+## Next Steps
+1. Replace CairoSVG with alternative SVG generation method
+2. Implement actual PPTX to SVG conversion
+3. Simplify architecture by removing Celery/Redis
+4. Create working demo with real PPTX processing
+5. Test with slidecanvas frontend component
+</file>
+
+<file path="memory-bank/activeContext.md">
+# Active Context
+
+## Current Focus
+Successfully integrated Supabase for storage and got basic PPTX processing working. The service can now:
+- Accept PPTX file uploads
+- Process slides using fallback SVG generation (ElementTree)
+- Upload SVGs and thumbnails to Supabase storage
+- Track job status and allow retrying failed jobs
+
+## Recent Changes
+1. **Fixed Critical Bugs**:
+   - Slide dimensions now correctly accessed from presentation object
+   - MSO_VERTICAL_ANCHOR enum mapping fixed by removing non-existent values
+   - Supabase URL validation improved with normalization
+
+2. **Supabase Integration**:
+   - Successfully connected to local Supabase instance
+   - Created all required database tables
+   - Configured storage buckets (slide-visuals, processing-results)
+   - Disabled RLS for development to avoid permission issues
+
+3. **Error Handling**:
+   - Added graceful handling of storage bucket creation errors
+   - Implemented retry mechanism for failed jobs
+   - Better logging throughout the process
+
+## Current Issues
+1. **LibreOffice**: Conversion command executes but produces no SVG output
+   - Might be Windows path or command argument issue
+   - Fallback to ElementTree is working fine
+
+2. **Performance**: Need to optimize for larger presentations
+
+## Next Steps
+1. Debug LibreOffice SVG generation on Windows
+2. Test with various PPTX files to ensure robustness
+3. Add production-ready RLS policies
+4. Improve error recovery mechanisms
+5. Performance optimization for large files
+
+## Technical State
+- API running on http://localhost:8000
+- Supabase running on http://127.0.0.1:54321
+- Storage buckets configured and working
+- Database schema implemented
+- Background task processing active
+- Retry mechanism implemented
+
+## User Workflow
+1. Upload PPTX file to `/api/process`
+2. Receive job ID and session ID
+3. Check status at `/status/status/{job_id}`
+4. If failed, can retry with `/status/retry/{job_id}`
+5. Get results at `/status/results/{session_id}` when completed
+
+## Active Decisions
+- **SVG Visuals (Primary)**: Batch LibreOffice `soffice.exe` call (`_generate_svgs_for_all_slides_libreoffice`) converting all slides at once.
+- **SVG Visuals (Fallback)**: ElementTree-based generation (`create_svg_from_slide`) using pre-extracted shape data.
+- **Text/Metadata Extraction**: `python-pptx` (via `extract_shapes`), performed once per slide.
+- **`LIBREOFFICE_PATH`**: Configurable via `.env` and `app.core.config.settings`.
+
+## Implementation Details for Hybrid Approach
+- `process_pptx` function:
+    - Checks for configured and valid `settings.LIBREOFFICE_PATH`.
+    - Calls `_generate_svgs_for_all_slides_libreoffice` once to get a dictionary mapping slide numbers to SVG paths.
+    - Iterates through slides, calling `process_slide` for each.
+- `_generate_svgs_for_all_slides_libreoffice` function:
+    - Uses `soffice --headless --convert-to svg:"impress_svg_Export" ...`.
+    - Manages a temporary directory for LibreOffice output.
+    - Attempts to sort and rename/map generated SVGs to `slide_{n}.svg` in the main processing output directory.
+    - Returns a dictionary `Dict[int, str]` of slide numbers to SVG paths.
+- `process_slide` function:
+    - Receives the path to a pre-generated LibreOffice SVG (if available).
+    - Calls `extract_shapes` once.
+    - If pre-generated SVG is not valid/available, calls `create_svg_from_slide` (passing extracted shapes and background fill).
+    - Uploads the chosen SVG.
+    - Generates thumbnail using `create_thumbnail_from_slide_pil` (passing extracted shapes).
+- `extract_shapes` provides all necessary data for both `ProcessedSlide` model and SVG fallback rendering.
+
+## User Requirements Clarified
+- App will take PPTX from frontend or get it from Supabase storage.
+- Generate SVG per slide with metadata for text display in slidecanvas frontend component.
+- Used for PPTX text translation.
+- No security or tests needed - just working functionality (though robustness is being improved).
+
+## Current Questions
+- How consistently does `impress_svg_Export` name output files across different LibreOffice versions/OS when converting a whole presentation?
+- What is the best strategy if `_generate_svgs_for_all_slides_libreoffice` produces an unexpected number of SVG files (e.g., not matching `slide_count`)?
+</file>
+
+<file path="memory-bank/systemPatterns.md">
+# System Patterns
+
+## Architecture Overview
+
+The PPTX Processor Service follows a clean architecture pattern with clear separation of concerns:
+
+```mermaid
+graph TD
+    A[Client] --> B(API Layer - FastAPI)
+    B --> C{Service Layer - pptx_processor.py}
+    C --> D[Data Models - Pydantic]
+    C --> E{Configuration - core/config.py}
+    C --> F(LibreOffice via Subprocess)
+    C --> G(python-pptx)
+    C --> H(Pillow)
+    C --> I(xml.etree.ElementTree)
+    C --> J(Supabase Client - Storage)
+```
+
+### Core Components
+1.  **API Layer (`main.py`, `app/api/routes/`)**: Handles HTTP requests, enqueues processing tasks using FastAPI `BackgroundTasks`.
+2.  **Service Layer (`app/services/pptx_processor.py`)**: Orchestrates the entire PPTX processing logic.
+    *   Uses `app.core.config.settings` for configuration (e.g., `LIBREOFFICE_PATH`).
+    *   Calls `_generate_svgs_for_all_slides_libreoffice` for batch SVG conversion.
+    *   Calls `process_slide` for each slide.
+3.  **SVG Generation Sub-System**:
+    *   **Primary (`_generate_svgs_for_all_slides_libreoffice`)**: Uses LibreOffice (`soffice`) via `subprocess` to convert the entire PPTX to SVGs in one batch operation.
+    *   **Fallback (`create_svg_from_slide`)**: Uses `python-pptx` (via `extract_shapes`) and `xml.etree.ElementTree` to generate SVGs if LibreOffice fails or is not configured.
+4.  **Metadata Extraction (`extract_shapes`)**: Uses `python-pptx` to extract detailed information about shapes, text, styles, and images from each slide.
+5.  **Thumbnail Generation (`create_thumbnail_from_slide_pil`)**: Uses Pillow, `python-pptx` (slide object), and extracted shape data to create PNG thumbnails.
+6.  **Data Models (`app/models/schemas.py`)**: Pydantic models for request/response validation and structured data representation.
+7.  **Storage (`app/services/supabase_service.py`)**: Handles uploading generated assets (SVGs, thumbnails, JSON results) to Supabase.
+
+### Processing Pipeline (Optimized)
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant API (FastAPI)
+    participant Processor (process_pptx)
+    participant BatchLO (LibreOffice Batch SVG)
+    participant SlideProc (process_slide)
+    participant PythonPPTX (extract_shapes)
+    participant ElementTree (fallback SVG)
+    participant Storage (Supabase)
+
+    Client->>API: Upload PPTX file
+    API->>Processor: Queue processing_pptx task (async)
+    Processor->>PythonPPTX: Load Presentation
+    Processor->>BatchLO: _generate_svgs_for_all_slides_libreoffice(pptx_path, out_dir, slide_count)
+    alt LibreOffice Success and SVGs Mapped
+        BatchLO-->>Processor: Dict[slide_num, svg_path]
+    else LibreOffice Fail or Mapping Issue
+        BatchLO-->>Processor: Empty Dict / Log warning
+    end
+
+    loop For Each Slide
+        Processor->>SlideProc: process_slide(slide, slide_num, pregen_svg_path_if_any)
+        SlideProc->>PythonPPTX: extract_shapes(slide)
+        alt Pre-generated LO SVG Available and Valid
+            SlideProc-->>SlideProc: Use LO SVG
+        else Fallback Needed
+            SlideProc->>ElementTree: create_svg_from_slide(extracted_shapes_data)
+            ElementTree-->>SlideProc: Fallback SVG path
+        end
+        SlideProc->>Storage: Upload chosen SVG & Thumbnail
+        SlideProc-->>Processor: ProcessedSlideData
+    end
+
+    Processor->>Storage: Upload final JSON result
+    Processor->>API: Update final job status (e.g., via local job status manager)
+    API-->>Client: Job ID and initial status (final result via polling status endpoint)
+```
+
+## Key Design Patterns
+
+### Hybrid Conversion (Optimized)
+-   **Primary Visuals**: Batch LibreOffice call for high-fidelity SVGs of all slides at once.
+    -   `_generate_svgs_for_all_slides_libreoffice(presentation_path, output_dir, slide_count)`
+-   **Fallback Visuals**: Per-slide ElementTree generation if LibreOffice fails/unavailable.
+    -   `create_svg_from_slide(slide_shapes_data, file_path, ...)`
+-   **Consistent Metadata**: `extract_shapes(slide, ...)` always uses `python-pptx`, ensuring uniform metadata regardless of the visual SVG source.
+
+### Configuration-Driven Behavior
+-   The availability and path of LibreOffice (`settings.LIBREOFFICE_PATH`) determine if the primary SVG generation path is attempted.
+
+### Centralized Settings Management
+-   `app.core.config.Settings` (Pydantic `BaseSettings`) loads configuration from `.env`, providing typed access throughout the application.
+
+### Asynchronous Task Execution
+-   FastAPI's `BackgroundTasks` for non-blocking PPTX processing.
+
+### Robust Fallbacks
+-   If batch LibreOffice fails, system gracefully attempts per-slide ElementTree SVG.
+-   If all SVG generation for a slide fails, a minimal placeholder SVG is created (`create_minimal_svg`).
+
+## Error Handling Strategy
+-   **Subprocess Management**: Timeouts and error capturing for LibreOffice calls.
+-   **File I/O**: Standard `try-except` blocks for file operations.
+-   **SVG Mapping Logic**: Specific checks for LibreOffice output file count against slide count to ensure correct association.
+-   **Logging**: Detailed logging at each significant step, especially around primary/fallback decisions and errors.
+
+## Future Extensibility
+-   The separation of concerns allows for easier addition of alternative SVG converters or metadata extractors.
+-   The batch processing pattern for LibreOffice could be adapted if other tools offer similar efficient whole-presentation processing.
+</file>
+
+<file path="memory-bank/techContext.md">
+# Technical Context
+
+## Technologies Used
+
+### Core Framework
+- **FastAPI**: Modern, high-performance Python web framework.
+
+### PPTX Processing & SVG Generation
+- **LibreOffice (via `subprocess`)**: Primary method for high-fidelity PPTX to SVG conversion. Uses a single batch call (`--convert-to svg:"impress_svg_Export"`) for all slides.
+- **`python-pptx`**: For parsing PPTX files, extracting slide content, shapes, text, styles, and metadata.
+- **`xml.etree.ElementTree`**: For fallback SVG generation if LibreOffice is unavailable or fails.
+- **Pillow (PIL)**: For image processing, including creating thumbnails and handling embedded images.
+
+### Backend and Storage
+- **Supabase**: For object storage (PPTX, SVGs, thumbnails) and potentially job status tracking (though currently local).
+
+### Utilities
+- **`python-dotenv`**: For managing environment variables.
+- **`uv`**: For Python package management (replacing pip).
+- **`aiofiles`**: For asynchronous file operations (though current direct use is minimal).
+
+## Current Technical Issues & Considerations
+
+### 1. LibreOffice SVG Output Mapping
+-   **Issue**: The `impress_svg_Export` filter's output file naming/numbering when converting a whole presentation needs to be robustly mapped to slide numbers. Current logic assumes sorted output matches slide order if file count is correct.
+-   **Mitigation**: Logging is in place. Further testing across LibreOffice versions/OS is needed. If mapping fails, the system falls back to per-slide ElementTree generation.
+
+### 2. Performance of Batch LibreOffice Conversion
+-   **Consideration**: While more efficient than per-slide calls, a single batch call for very large presentations might be long-running or memory-intensive. Timeouts are implemented.
+-   **Optimization**: Current approach is a significant improvement. Further parallelization of *independent* tasks (like thumbnail generation after SVGs are ready) could be explored if needed.
+
+### 3. Fallback SVG Fidelity
+-   **Limitation**: The ElementTree-based SVG fallback (`create_svg_from_slide`) has inherent limitations in rendering complex PowerPoint features (e.g., intricate SmartArt, some chart types, complex gradients) with perfect visual fidelity compared to LibreOffice.
+
+## Development Setup
+
+### Environment Requirements
+-   Python 3.10+
+-   LibreOffice (optional but highly recommended for best SVG quality).
+-   Supabase account and project (for storage).
+
+### Working Local Development Steps
+1.  Clone repository.
+2.  Create a Python virtual environment.
+3.  Install dependencies: `uv pip install -r requirements.txt`.
+4.  Set up a `.env` file based on `env.example` (configure Supabase, `LIBREOFFICE_PATH`, etc.).
+5.  Ensure LibreOffice is installed and `LIBREOFFICE_PATH` in `.env` points to the `soffice` executable if using this feature.
+6.  Run development server: `uvicorn main:app --reload` (or as per `pyproject.toml`).
+
+### Key Environment Variables (`.env`)
+-   `SUPABASE_URL`, `SUPABASE_KEY`: For Supabase integration.
+-   `LIBREOFFICE_PATH`: Optional path to `soffice` executable.
+-   `LOG_LEVEL`: E.g., `INFO`, `DEBUG`.
+-   `TEMP_DIR`: Base directory for temporary processing files (though `TEMP_UPLOAD_DIR`, `TEMP_PROCESSING_DIR` from `app.core.config` are more specific now).
+
+## Technical Constraints & Decisions
+
+### SVG Generation Strategy: Hybrid, Optimized
+-   **Primary**: Batch LibreOffice call for all slides for high visual fidelity and efficiency.
+-   **Fallback**: `python-pptx` + ElementTree for guaranteed SVG output (lower fidelity for complex elements) if LibreOffice fails or is not configured.
+-   **Rationale**: Balances visual quality, robustness, and performance.
+
+### Metadata Extraction
+-   Always performed using `python-pptx` (`extract_shapes`) once per slide, irrespective of the SVG generation method used for that slide's visual.
+
+### Asynchronous Operations
+-   FastAPI's `BackgroundTasks` are used for the main `process_pptx` task, keeping the API responsive.
+
+### Configuration
+-   Key operational parameters (LibreOffice path, Supabase details) are managed via `app.core.config.Settings` loading from `.env`.
+
+## Implemented Technical Stack Summary
+
+-   **API**: FastAPI
+-   **PPTX Parsing & Metadata**: `python-pptx`
+-   **Primary SVG Rendering**: LibreOffice (`soffice` via `subprocess`)
+-   **Fallback SVG Rendering**: `xml.etree.ElementTree`
+-   **Image Handling/Thumbnails**: Pillow
+-   **Package Management**: `uv`
+-   **Configuration**: `python-dotenv`, Pydantic `BaseSettings`
+-   **Storage**: Supabase (via `supabase-py` client library)
+
+## Dependencies (Key Libraries)
+-   `fastapi`
+-   `uvicorn`
+-   `python-pptx`
+-   `Pillow`
+-   `pydantic`
+-   `pydantic-settings`
+-   `python-dotenv`
+-   `supabase`
+-   Standard libraries: `os`, `shutil`, `subprocess`, `glob`, `json`, `xml.etree.ElementTree`, `logging`, `asyncio`, `tempfile`.
+</file>
+
+<file path="README.md">
+# PPTX Processor Service
+
+A simple microservice for converting PowerPoint presentations to SVGs and extracting text data with positioning information.
+
+## Features
+
+- Convert PPTX slides to SVG format
+- Extract text elements with precise coordinates and styling information
+- Generate thumbnails for each slide
+- Provide metadata for text display in slidecanvas frontend component
+- Store processed assets in Supabase Storage (configured via environment variables)
+
+## Integration Guide
+
+For detailed information on integrating with the PPTX Processor Service, see the [Integration Guide](docs/integration-guide.md).
+
+## Getting Started
+
+### Prerequisites
+
+- Python 3.8 or higher
+- UV (package management tool)
+- Supabase (local or cloud instance)
+
+### Installation
+
+1. Clone the repository
+2. Install dependencies with UV:
+
+```bash
+uv pip install -r requirements.txt
+```
+
+3. Create a `.env` file based on the `env.example` file:
+
+```bash
+# Server
+API_ENV=development
+API_PORT=8000
+API_HOST=0.0.0.0
+LOG_LEVEL=INFO
+
+# Storage paths
+TEMP_UPLOAD_DIR=./tmp/uploads
+TEMP_PROCESSING_DIR=./tmp/processing
+
+# Supabase (update these with your actual values)
+SUPABASE_URL=http://127.0.0.1:54321
+SUPABASE_KEY=your-supabase-anon-key
+SUPABASE_STORAGE_BUCKET=slide-visuals
+
+# Security
+ALLOWED_ORIGINS=http://localhost:3000
+```
+
+### Supabase Setup
+
+#### 1. Database Setup
+
+Run the SQL script to create required tables:
+
+```bash
+# Using Supabase Studio (recommended):
+# 1. Go to http://127.0.0.1:54323
+# 2. Navigate to SQL Editor
+# 3. Copy and paste contents of supabase_setup.sql
+# 4. Click Run
+```
+
+#### 2. Storage Setup
+
+Follow the instructions in `STORAGE_SETUP.md` to create the required storage buckets through the Supabase Studio UI.
+
+### Running the Service
+
+```bash
+python main.py
+```
+
+The API will be available at `http://localhost:8000`.
+
+## API Endpoints
+
+### Process a PPTX File
+
+```
+POST /api/process
+```
+
+**Form Data:**
+- `file`: The PPTX file to process
+- `session_id`: Unique identifier for the translation session
+- `source_language` (optional): The source language of the presentation
+- `target_language` (optional): The target language for translation
+- `generate_thumbnails` (optional, default: true): Whether to generate slide thumbnails
+
+**Response:**
+```json
+{
+  "job_id": "uuid",
+  "session_id": "your-session-id",
+  "status": "QUEUED",
+  "message": "PPTX processing has been queued",
+  "estimated_completion_time": "2025-06-02T12:00:00Z"
+}
+```
+
+### Check Processing Status
+
+```
+GET /status/{job_id}
+```
+
+**Response:**
+```json
+{
+  "job_id": "uuid",
+  "session_id": "your-session-id",
+  "status": "COMPLETED",
+  "progress": 100,
+  "current_stage": "Processing completed",
+  "completed_at": "2025-06-02T12:05:00Z"
+}
+```
+
+### Health Check
+
+```
+GET /health
+```
+
+## Architecture
+
+This service is built with:
+
+- **FastAPI**: Web framework for API endpoints
+- **Python-PPTX**: Library for parsing PowerPoint files
+- **Custom SVG Generation**: Using ElementTree to generate SVGs without dependencies
+- **Supabase**: Storage for assets (configured via environment variables)
+
+## Implementation Notes
+
+- SVG conversion is done by extracting elements from PPTX and rendering to SVG format
+- Text extraction preserves positioning and basic styling information
+- Direct SVG generation avoids dependencies on Cairo or other rendering libraries
+- Asynchronous processing with FastAPI background tasks
+- Compatible with Windows development environment
+- Supabase credentials are configured via environment variables, not passed in requests
+
+## License
+
+MIT
+</file>
+
+<file path="memory-bank/progress.md">
+# Progress Tracking
+
+## What Works
+- ✅ **API Framework**: FastAPI server running and accepting requests
+- ✅ **File Upload**: PPTX files can be uploaded via multipart form data
+- ✅ **Basic Processing**: File processing queue with background tasks
+- ✅ **Supabase Integration**: Connected to local Supabase instance
+- ✅ **Database Tables**: Created all required tables (translation_sessions, slides, slide_shapes, health_check)
+- ✅ **Storage Buckets**: Configured slide-visuals and processing-results buckets
+- ✅ **File Upload to Storage**: Successfully uploading SVGs and thumbnails to Supabase storage
+- ✅ **SVG Generation**: Fallback SVG generation using ElementTree working
+- ✅ **Thumbnail Generation**: Creating thumbnails with PIL
+- ✅ **Text Extraction**: Extracting text with positioning and styling from slides
+- ✅ **Slide Dimensions Fix**: Fixed slide width/height access from presentation object
+- ✅ **RLS Configuration**: Disabled RLS for development to avoid permission issues
+- ✅ **Retry Mechanism**: Added ability to retry failed jobs
+
+## What's Partially Working
+- ⚠️ **LibreOffice Integration**: Path configured but SVG conversion not producing output
+  - LibreOffice is being called but not generating SVG files
+  - Fallback to ElementTree SVG generation is working
+- ⚠️ **Health Check**: Working but showing unhealthy Supabase connection sometimes
+
+## What Needs Work
+- ❌ **LibreOffice SVG Conversion**: Need to debug why LibreOffice isn't producing SVG files
+  - Might need different command line arguments
+  - Could be a Windows-specific path issue
+- ❌ **Production RLS Policies**: Currently disabled for development
+- ❌ **Batch Processing**: Endpoint exists but not thoroughly tested
+- ❌ **Error Recovery**: Need better error handling for partial failures
+
+## Known Issues
+1. **LibreOffice**: Not generating SVG output on Windows
+2. **Storage RLS**: Had to disable RLS on storage tables for development
+3. **MSO_VERTICAL_ANCHOR**: Fixed incorrect enum values that don't exist in python-pptx
+
+## Recent Fixes
+1. Fixed slide dimensions access - now using `presentation.slide_width` instead of `slide.slide_width`
+2. Fixed MSO_VERTICAL_ANCHOR enum mapping - removed non-existent attributes
+3. Fixed Supabase URL validation with normalization
+4. Fixed storage bucket creation to handle RLS errors gracefully
+5. Added retry capability for failed jobs
+
+## Next Steps
+1. Debug LibreOffice SVG conversion on Windows
+2. Test with various PPTX files to ensure robustness
+3. Implement proper RLS policies for production
+4. Add more comprehensive error handling
+5. Optimize performance for large presentations
+</file>
+
+</files>

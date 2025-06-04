@@ -14,12 +14,44 @@
 
 - **PPTX Processor Service:**
     - Standalone Python FastAPI microservice (`pptx-processor-service/`) for handling PPTX conversion
-    - `/v1/process` endpoint for receiving PPTX files and session metadata
-    - Background task processing for asynchronous handling of conversions
-    - LibreOffice integration for high-quality SVG conversion of slides
+    - API Endpoints:
+      - `/v1/process`: Accepts PPTX files for processing
+      - `/v1/process/batch`: Handles batch processing of multiple files
+      - `/v1/status/{job_id}`: Check status of processing jobs
+      - `/v1/results/{session_id}`: Retrieve processing results
+      - `/v1/retry/{job_id}`: Retry failed jobs
+      - `/v1/health`: Service health check
+    - Background task processing using FastAPI BackgroundTasks
+    - Hybrid SVG generation approach:
+      - Primary: LibreOffice integration for high-quality SVG conversion
+      - Fallback: ElementTree-based SVG generation
     - Text extraction with coordinate data for interactive overlays
+    - Job status tracking with in-memory storage and file-based backup
     - Supabase integration for storing generated assets and updating database
-    - Job status tracking and retrieval endpoints
+    - Thumbnail generation using Pillow
+    - Detailed error handling and logging
+    - Retry mechanism for failed jobs
+
+- **Audit Service:**
+    - Standalone Go microservice (`audit-service/`) for tracking and retrieving audit logs
+    - API Endpoints:
+      - `/api/v1/sessions/{sessionId}/history`: Retrieve audit history for a session
+      - `/api/v1/events`: Create new audit events
+      - `/health`: Service health check
+    - JWT and share token authentication
+    - Structured logging with request ID tracking
+    - Comprehensive middleware stack (auth, logging, error handling)
+    - Swagger/OpenAPI documentation
+    - Test session support for development
+    - Fixed API format compatibility by updating field names from 'action' to 'type' across frontend and backend
+    - Enhanced error handling for service unavailability with specific error messages
+    - Documentation for test session ID pattern and environment configuration
+
+- **Frontend Audit Integration:**
+    - `AuditQueueService` for reliable audit event submission with offline and retry support
+    - `AuditServiceClient` for communicating with the Audit Service
+    - `useAuditLog` hook for React components to log events and fetch history
+    - Graceful degradation when the audit service is unavailable
 
 - **Database Setup (Supabase PostgreSQL):**
     - `translation_sessions` table: Created, seeded with sample data. RLS policies in place.
@@ -84,11 +116,22 @@
 
 ## 2. What's Left to Build / Key Pending Areas
 
+- **LibreOffice Integration Issues:**
+    - Debug the LibreOffice SVG conversion on Windows
+    - Find the correct command-line arguments for reliable SVG output
+    - Test on different environments and with different LibreOffice versions
+
 - **Frontend-Processor Service Integration:**
     - Complete the integration between the Next.js frontend and the PPTX processor service
     - Implement proper file upload to the processor service rather than directly to Supabase
-    - Add polling or webhook mechanism for tracking processing status
+    - Implement polling mechanism for tracking processing status
     - Update UI to show accurate processing status and progress
+
+- **Complete Audit Service Integration:**
+    - Add audit log display component in the editor UI
+    - Test the integration with the updated API format (using 'type' instead of 'action')
+    - Implement comprehensive event logging for all user actions
+    - Add audit log filtering and search capabilities
 
 - **`UploadWizard` Full Integration:**
     - Replace mock upload flow with actual file upload to the processor service
@@ -112,8 +155,6 @@
 
 - **Share Page/Functionality:** UI and logic for generating and managing shareable links to translation sessions (view-only or collaborative)
 
-- **Additional Settings Pages:** ✅ **COMPLETED** - Settings page implemented with translation preferences, notification settings, and application preferences
-
 - **Deployment and Operations:**
     - Set up proper deployment environment for the PPTX processor service
     - Configure production-ready settings and environment variables
@@ -129,15 +170,19 @@
 - **Testing:** Unit and integration tests for both frontend and processor service
 
 ## 3. Current Overall Status
-The project has made significant progress with the implementation of both the frontend components and the PPTX processor service. The processor service is operational with LibreOffice integration for high-fidelity SVG generation and text extraction, solving one of the critical technical challenges. The frontend components for authentication, dashboard, and the slide editor structure are in place, with the key `SlideCanvas` component refactored to support the high-fidelity SVG rendering approach.
+The project has made significant progress with the implementation of both the frontend components and the backend microservices. The PPTX processor service is operational with a hybrid approach for SVG generation, while the Audit Service provides comprehensive logging capabilities with proper authentication and error handling.
 
-The main focus now is on connecting these two components - integrating the frontend with the processor service to enable end-to-end functionality from upload to editing. Once this integration is complete, the application will provide a solid foundation for translation functionality, with future efforts focused on enhancing the editing experience, collaboration features, and export capabilities.
+The frontend components for authentication, dashboard, and the slide editor structure are in place, with the key `SlideCanvas` component refactored to support the high-fidelity SVG rendering approach. Recent fixes to the API format compatibility between the frontend and the Audit Service ensure consistent communication.
+
+The main focus now is on resolving the LibreOffice integration issues and connecting these components - integrating the frontend with both the processor service and audit service to enable end-to-end functionality from upload to editing. Once this integration is complete, the application will provide a solid foundation for translation functionality, with future efforts focused on enhancing the editing experience, collaboration features, and export capabilities.
 
 ## 4. Known Issues & Challenges
 
-- **Integration Complexity:** Ensuring seamless integration between the Next.js frontend and the Python FastAPI processor service, especially for handling file uploads and processing status updates.
+- **LibreOffice SVG Generation:** The primary SVG generation using LibreOffice is experiencing issues on Windows, where the command executes but produces no output. This requires debugging the command-line arguments or considering alternative approaches.
 
-- **Deployment Configuration:** Setting up the appropriate deployment environment for the PPTX processor service, which requires LibreOffice and other dependencies that aren't typically available in serverless environments.
+- **Integration Complexity:** Ensuring seamless integration between the Next.js frontend and the microservices, especially for handling file uploads, processing status updates, and audit logging.
+
+- **Deployment Configuration:** Setting up the appropriate deployment environment for the microservices, which require specific dependencies (like LibreOffice) that aren't typically available in serverless environments.
 
 - **SVG and Overlay Performance:** Rendering potentially complex SVGs and numerous interactive overlays for slides with many text elements needs to be monitored for performance. Initial tests show good results, but optimization may be needed for very complex presentations.
 

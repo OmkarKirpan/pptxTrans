@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
+import { useAuditLog } from "@/hooks/useAuditLog" // Import audit log hook
 
 // MOCK DATA using ProcessedSlide and new SlideShape structure
 const MOCK_PROCESSED_SLIDES: ProcessedSlide[] = [
@@ -123,6 +124,9 @@ export default function SlideEditorPage() {
   const supabase = createClient()
 
   const sessionId = params.sessionId as string
+  
+  // Initialize audit logging
+  const { createAuditEvent } = useAuditLog(sessionId)
 
   const [user, setUser] = useState<User | null>(null)
   const [session, setSession] = useState<TranslationSession | null>(null)
@@ -173,17 +177,25 @@ export default function SlideEditorPage() {
         setSession(mockSessionData)
         setSlides(MOCK_PROCESSED_SLIDES) // Using mock slides
         setCurrentSlide(MOCK_PROCESSED_SLIDES[0] || null)
+        
+        // Log view event
+        createAuditEvent('view', { initialSlide: MOCK_PROCESSED_SLIDES[0]?.slide_number || 1 })
       }
       setLoading(false)
     }
     if (sessionId) {
       fetchData()
     }
-  }, [sessionId, supabase, router])
+  }, [sessionId, supabase, router, createAuditEvent])
 
   const handleSelectSlide = (slideId: string) => {
     const selected = slides.find((s) => s.id === slideId)
     setCurrentSlide(selected || null)
+    
+    // Log slide selection
+    if (selected) {
+      createAuditEvent('view', { slideNumber: selected.slide_number })
+    }
   }
 
   const handleTextClick = (shapeId: string, originalText: string, currentTranslation?: string) => {
@@ -192,6 +204,13 @@ export default function SlideEditorPage() {
       shapeId,
       originalText,
       currentTranslation: currentTranslation || "",
+    })
+    
+    // Log text selection for editing
+    createAuditEvent('edit', { 
+      action: 'select_text',
+      shapeId, 
+      slideNumber: currentSlide?.slide_number
     })
   }
 
@@ -213,124 +232,116 @@ export default function SlideEditorPage() {
       }
       return s
     })
+
     setSlides(newSlides)
     setCurrentSlide(newSlides.find((s) => s.id === currentSlide.id) || null)
+    setTextEditor({ ...textEditor, isOpen: false })
 
-    // Actual save to Supabase
-    const { error: updateError } = await supabase
-      .from("slide_shapes")
-      .update({ translated_text: textEditor.currentTranslation, updated_at: new Date().toISOString() })
-      .eq("id", textEditor.shapeId)
-
-    if (updateError) {
-      console.error("Failed to save translation:", updateError)
-      setError("Failed to save translation. Please try again.")
-      // Revert optimistic update if needed
-      setSlides(slides) // Revert to original slides state on error
-      setCurrentSlide(slides.find((s) => s.id === currentSlide.id) || null)
-    } else {
-      console.log("Translation saved for shape:", textEditor.shapeId)
-    }
-
-    setTextEditor({ isOpen: false, shapeId: null, originalText: "", currentTranslation: "" })
+    // In a real app: Save to Supabase here
+    // const { data, error } = await supabase.from('slide_shapes').update({ translated_text: textEditor.currentTranslation }).eq('id', textEditor.shapeId)
+    // If error, revert the optimistic update
+    
+    // Log translation save
+    createAuditEvent('edit', {
+      action: 'save_translation',
+      shapeId: textEditor.shapeId,
+      slideNumber: currentSlide.slide_number
+    })
   }
 
   if (loading) {
     return (
-      <div className="flex h-screen flex-col items-center justify-center">
+      <div className="flex min-h-screen flex-col items-center justify-center">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
-        <p className="mt-4 text-muted-foreground">Loading Editor...</p>
+        <p className="mt-4 text-xl">Loading slide editor...</p>
       </div>
     )
   }
 
-  if (error && !currentSlide) {
-    // Show full page error if critical
+  if (error) {
     return (
-      <div className="flex h-screen flex-col items-center justify-center p-4">
+      <div className="flex min-h-screen flex-col items-center justify-center">
         <AlertTriangle className="h-12 w-12 text-destructive" />
-        <p className="mt-4 text-lg font-semibold">Error Loading Session</p>
-        <p className="text-muted-foreground">{error}</p>
-        <Button onClick={() => router.push("/dashboard")} className="mt-6">
-          Back to Dashboard
+        <p className="mt-4 text-xl text-destructive">{error}</p>
+        <Button className="mt-4" onClick={() => router.push("/dashboard")}>
+          Return to Dashboard
         </Button>
       </div>
     )
   }
 
-  // The SlideNavigator also needs to be updated to accept ProcessedSlide[]
-  // and use svg_url for thumbnails if available. For now, it might use placeholders.
-  // This change is not shown here but would be necessary.
+  if (!session || !currentSlide) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center">
+        <AlertTriangle className="h-12 w-12 text-warning" />
+        <p className="mt-4 text-xl">Session or slide data not found.</p>
+        <Button className="mt-4" onClick={() => router.push("/dashboard")}>
+          Return to Dashboard
+        </Button>
+      </div>
+    )
+  }
 
   return (
     <div className="flex h-screen flex-col overflow-hidden">
+      {/* Header */}
       <DashboardHeader user={user} />
-      <div className="flex flex-1 overflow-hidden border-t">
-        <aside className="w-64 flex-shrink-0 border-r bg-background overflow-y-auto">
-          {/* Ensure SlideNavigator can handle ProcessedSlide[] and use svg_url for thumbnails */}
+
+      {/* Main content area */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Left sidebar - Slide Navigator */}
+        <div className="w-64 flex-none overflow-y-auto border-r bg-muted/30 p-4">
           <SlideNavigator
-            slides={slides as any[]} // Cast for now, SlideNavigator needs update
-            currentSlideId={currentSlide?.id || null}
+            slides={slides}
+            currentSlideId={currentSlide.id}
             onSelectSlide={handleSelectSlide}
           />
-        </aside>
+        </div>
 
-        <main className="flex-1 overflow-auto bg-muted/20">
-          <SlideCanvas slide={currentSlide} editable={true} onTextClick={handleTextClick} showReadingOrder={false} />
-        </main>
+        {/* Center - Slide Canvas */}
+        <div className="flex-1 overflow-y-auto bg-background p-6">
+          <SlideCanvas
+            slide={currentSlide}
+            onTextClick={handleTextClick}
+          />
+        </div>
 
-        <aside className="w-80 flex-shrink-0 border-l bg-background overflow-y-auto">
-          <CommentsPanel />
-        </aside>
+        {/* Right sidebar - Comments Panel */}
+        <div className="w-80 flex-none overflow-y-auto border-l bg-muted/30 p-4">
+          <CommentsPanel slideId={currentSlide.id} />
+        </div>
       </div>
 
-      <Dialog
-        open={textEditor.isOpen}
-        onOpenChange={(isOpen) => {
-          if (!isOpen) setTextEditor((prev) => ({ ...prev, isOpen: false }))
-        }}
-      >
-        <DialogContent className="sm:max-w-[500px]">
+      {/* Text Editing Dialog */}
+      <Dialog open={textEditor.isOpen} onOpenChange={(open) => setTextEditor({ ...textEditor, isOpen: open })}>
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Edit Translation</DialogTitle>
           </DialogHeader>
           <div className="grid gap-4 py-4">
-            <div>
-              <Label htmlFor="original-text" className="text-xs text-muted-foreground">
-                Original Text (Read-only)
-              </Label>
-              <p id="original-text" className="mt-1 rounded-md border bg-muted p-3 text-sm max-h-32 overflow-y-auto">
-                {textEditor.originalText}
-              </p>
+            <div className="grid gap-2">
+              <Label htmlFor="original-text">Original Text</Label>
+              <div className="rounded-md bg-muted p-3 text-sm">{textEditor.originalText}</div>
             </div>
-            <div>
-              <Label htmlFor="translation-input">Translation</Label>
+            <div className="grid gap-2">
+              <Label htmlFor="translated-text">Translation</Label>
               <Textarea
-                id="translation-input"
+                id="translated-text"
                 value={textEditor.currentTranslation}
-                onChange={(e) => setTextEditor((prev) => ({ ...prev, currentTranslation: e.target.value }))}
+                onChange={(e) => setTextEditor({ ...textEditor, currentTranslation: e.target.value })}
                 placeholder="Enter translation here..."
-                className="mt-1 min-h-[100px]"
+                rows={5}
               />
             </div>
           </div>
           <DialogFooter>
             <DialogClose asChild>
-              <Button type="button" variant="outline">
-                Cancel
-              </Button>
+              <Button variant="outline">Cancel</Button>
             </DialogClose>
-            <Button type="button" onClick={handleSaveTranslation}>
-              Save Translation
-            </Button>
+            <Button onClick={handleSaveTranslation}>Save Translation</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      {error && ( // Display non-critical errors as a toast or small message
-        <div className="absolute bottom-4 right-4 bg-destructive text-destructive-foreground p-3 rounded-md shadow-lg">
-          <p>{error}</p>
-        </div>
-      )}
     </div>
   )
 }
