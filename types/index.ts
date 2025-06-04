@@ -1,3 +1,15 @@
+// Types index file
+// Export all types from their respective modules
+
+export * from './database/schema'
+export * from './api/requests'
+export * from './store/session'
+
+// Re-export commonly used types
+export type { Database } from './database/schema'
+export type { UploadPresentationRequest, UpdatePresentationRequest } from './api/requests'
+export type { User, SessionState, SessionActions } from './store/session'
+
 export type SessionStatus = "draft" | "in-progress" | "ready"
 
 export interface TranslationSession {
@@ -64,4 +76,6 @@ export interface UploadedFile {
   previewUrl?: string
   progress: number
   error?: string
+  storagePath?: string // Path in Supabase storage
+  publicUrl?: string // Public URL for the file
 }

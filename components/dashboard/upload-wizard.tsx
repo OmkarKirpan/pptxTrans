@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback, type ChangeEvent, type DragEvent, useEffect } from "react"
+import { useState, useCallback, useRef, type ChangeEvent, type DragEvent, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
@@ -14,6 +14,8 @@ import Image from "next/image"
 import { useAuditLog } from "@/hooks/useAuditLog"
 import { useSession } from "@/lib/store"
 import { createClient } from "@/lib/supabase/client"
+import { PptxProcessorClient } from "@/lib/api/pptx-processor"
+import * as tus from "tus-js-client"
 
 interface UploadWizardProps {
   onComplete: (sessionId: string, sessionName: string) => void
@@ -32,6 +34,10 @@ type WizardStep = (typeof STEPS)[keyof typeof STEPS]
 export default function UploadWizard({ onComplete, supportedLanguages, userId }: UploadWizardProps) {
   const router = useRouter()
   const supabase = createClient()
+  const pptxProcessor = new PptxProcessorClient()
+  const uploadCancelRef = useRef<boolean>(false)
+  const tusUploadRef = useRef<tus.Upload | null>(null)
+  
   const [currentStep, setCurrentStep] = useState<WizardStep>(STEPS.UPLOAD)
   const [uploadedFile, setUploadedFile] = useState<UploadedFile | null>(null)
   const [isUploading, setIsUploading] = useState(false)
@@ -46,6 +52,7 @@ export default function UploadWizard({ onComplete, supportedLanguages, userId }:
   const [configError, setConfigError] = useState<string | null>(null)
 
   const [sessionId, setSessionId] = useState<string | null>(null)
+  const [jobId, setJobId] = useState<string | null>(null)
   
   // Use the session slice from the store
   const { setSession, setLoading, setError, isLoading, error } = useSession()
@@ -71,6 +78,7 @@ export default function UploadWizard({ onComplete, supportedLanguages, userId }:
       }
       setUploadError(null)
       setIsUploading(true)
+      uploadCancelRef.current = false
       setUploadedFile({ file, progress: 0 })
 
       createAuditEvent('create', {
@@ -78,27 +86,167 @@ export default function UploadWizard({ onComplete, supportedLanguages, userId }:
         fileName: file.name,
         fileSize: file.size
       })
-
-      // Mock upload progress
-      let progress = 0
-      const interval = setInterval(() => {
-        progress += 10
-        if (progress <= 100) {
-          setUploadedFile((prev) => (prev ? { ...prev, progress } : null))
-        } else {
-          clearInterval(interval)
-          setIsUploading(false)
-          setUploadedFile((prev) => (prev ? { ...prev, progress: 100 } : null))
-          
-          createAuditEvent('create', {
-            action: 'file_upload_completed',
-            fileName: file.name,
-            fileSize: file.size
-          })
-        }
-      }, 200)
     }
   }
+
+  // Upload file to Supabase Storage using resumable uploads (TUS protocol)
+  const uploadFileToSupabase = async (file: File) => {
+    try {
+      // Generate a unique filename to prevent collisions
+      const timestamp = new Date().getTime()
+      const fileExtension = file.name.split('.').pop()
+      const uniqueFilename = `${timestamp}_${file.name}`
+      const filePath = `uploads/${userId}/${uniqueFilename}`
+      
+      // Get the current session for auth
+      const { data: { session } } = await supabase.auth.getSession()
+      
+      if (!session) {
+        throw new Error('Authentication required')
+      }
+      
+      return new Promise<{ path: string; publicUrl: string }>((resolve, reject) => {
+        // Create a new tus upload
+        tusUploadRef.current = new tus.Upload(file, {
+          // The endpoint for resumable uploads
+          endpoint: `${process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://your-project.supabase.co'}/storage/v1/upload/resumable`,
+          // Retry delays on failure
+          retryDelays: [0, 3000, 5000, 10000, 20000],
+          // Auth headers
+          headers: {
+            authorization: `Bearer ${session.access_token}`,
+            'x-upsert': 'true', // Overwrite if file exists
+          },
+          // Upload data during creation request
+          uploadDataDuringCreation: true,
+          // Remove fingerprint when upload completes
+          removeFingerprintOnSuccess: true,
+          // Metadata for the file
+          metadata: {
+            bucketName: 'pptx-files',
+            objectName: filePath,
+            contentType: file.type,
+            cacheControl: '3600',
+          },
+          // Use 6MB chunks (required by Supabase Storage)
+          chunkSize: 6 * 1024 * 1024,
+          // Error handler
+          onError: (error) => {
+            console.error('Upload failed:', error)
+            setUploadError(`Upload failed: ${error.message || 'Unknown error'}`)
+            setIsUploading(false)
+            
+            createAuditEvent('create', {
+              action: 'file_upload_failed',
+              fileName: file.name,
+              fileSize: file.size,
+              error: error.message || 'Unknown error'
+            })
+            
+            reject(error)
+          },
+          // Progress handler
+          onProgress: (bytesUploaded, bytesTotal) => {
+            if (uploadCancelRef.current) return
+            
+            const percentage = Math.round((bytesUploaded / bytesTotal) * 100)
+            setUploadedFile((prev) => (prev ? { ...prev, progress: percentage } : null))
+          },
+          // Success handler
+          onSuccess: () => {
+            console.log('Upload completed successfully')
+            
+            // Get the public URL
+            const publicUrl = supabase.storage
+              .from('pptx-files')
+              .getPublicUrl(filePath)
+            
+            createAuditEvent('create', {
+              action: 'file_upload_completed',
+              fileName: file.name,
+              fileSize: file.size,
+              filePath,
+              publicUrl: publicUrl.data.publicUrl
+            })
+            
+            resolve({
+              path: filePath,
+              publicUrl: publicUrl.data.publicUrl
+            })
+          }
+        })
+        
+        // Check for previous uploads to resume
+        tusUploadRef.current.findPreviousUploads().then((previousUploads) => {
+          // If there are previous uploads, resume from the first one
+          if (previousUploads.length) {
+            tusUploadRef.current!.resumeFromPreviousUpload(previousUploads[0])
+          }
+          
+          // Start the upload
+          tusUploadRef.current!.start()
+        })
+      })
+    } catch (error) {
+      console.error('Error in uploadFileToSupabase:', error)
+      createAuditEvent('create', {
+        action: 'file_upload_failed',
+        fileName: file.name,
+        fileSize: file.size,
+        error: error instanceof Error ? error.message : String(error)
+      })
+      throw error
+    }
+  }
+
+  // Cancel upload if in progress
+  const cancelUpload = () => {
+    if (tusUploadRef.current && isUploading) {
+      uploadCancelRef.current = true
+      tusUploadRef.current.abort()
+      setIsUploading(false)
+      setUploadedFile(null)
+      
+      createAuditEvent('create', {
+        action: 'file_upload_cancelled',
+        fileName: uploadedFile?.file.name,
+        fileSize: uploadedFile?.file.size
+      })
+    }
+  }
+
+  // Handle file upload
+  useEffect(() => {
+    const uploadFile = async () => {
+      if (uploadedFile && isUploading && uploadedFile.progress === 0) {
+        try {
+          const result = await uploadFileToSupabase(uploadedFile.file)
+          
+          // Update uploadedFile with storage path
+          setUploadedFile((prev) => 
+            prev ? { ...prev, progress: 100, storagePath: result.path, publicUrl: result.publicUrl } : null
+          )
+          setIsUploading(false)
+        } catch (error) {
+          setUploadError(`Upload failed: ${error instanceof Error ? error.message : String(error)}`)
+          setIsUploading(false)
+          setUploadedFile((prev) => (prev ? { ...prev, error: String(error) } : null))
+        }
+      }
+    }
+    
+    uploadFile()
+  }, [uploadedFile, isUploading])
+
+  // Clean up upload when component unmounts
+  useEffect(() => {
+    return () => {
+      if (tusUploadRef.current && isUploading) {
+        uploadCancelRef.current = true
+        tusUploadRef.current.abort()
+      }
+    }
+  }, [isUploading])
 
   const onDrop = useCallback((event: DragEvent<HTMLDivElement>) => {
     event.preventDefault()
@@ -148,26 +296,22 @@ export default function UploadWizard({ onComplete, supportedLanguages, userId }:
       targetLanguage
     })
 
-    // Mock parsing progress
-    await new Promise((resolve) => setTimeout(resolve, 2000))
-    setIsParsing(false)
-    setIsCreatingSession(true)
-    setLoading(true)
-
-    // Prepare session data
-    const sessionData = {
-      name: sessionName,
-      user_id: userId,
-      source_language: sourceLanguage,
-      target_language: targetLanguage,
-      status: "draft" as const,
-      progress: 0,
-      slide_count: 0,
-      thumbnail_url: null,
-      original_file_path: null
-    }
-
     try {
+      // Prepare session data
+      const sessionData = {
+        name: sessionName,
+        user_id: userId,
+        source_language: sourceLanguage,
+        target_language: targetLanguage,
+        status: "draft" as const,
+        progress: 0,
+        slide_count: 0,
+        thumbnail_url: null,
+        original_file_path: uploadedFile?.storagePath || null
+      }
+  
+      setLoading(true)
+      
       // Create session in Supabase
       const { data, error } = await supabase
         .from('translation_sessions')
@@ -181,6 +325,9 @@ export default function UploadWizard({ onComplete, supportedLanguages, userId }:
       const newSessionId = data.id;
       setSessionId(newSessionId);
       
+      setIsParsing(false)
+      setIsCreatingSession(true)
+      
       // Create a session object to store in Zustand
       const newSession: TranslationSession = {
         id: newSessionId,
@@ -192,14 +339,13 @@ export default function UploadWizard({ onComplete, supportedLanguages, userId }:
         progress: 0,
         slide_count: 0,
         thumbnail_url: null,
-        original_file_path: null,
+        original_file_path: uploadedFile?.storagePath || null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       }
       
       // Update the store with the new session
       setSession(newSession, 'owner')
-      setLoading(false)
       
       createAuditEvent('create', {
         action: 'session_created',
@@ -208,14 +354,50 @@ export default function UploadWizard({ onComplete, supportedLanguages, userId }:
         sourceLanguage,
         targetLanguage
       })
-
+      
+      // Process the PPTX file if it was uploaded successfully
+      if (uploadedFile && uploadedFile.file) {
+        try {
+          // Call the PPTX processor service
+          const processingResponse = await pptxProcessor.processPptx(
+            uploadedFile.file,
+            newSessionId,
+            sourceLanguage,
+            targetLanguage,
+            true // Generate thumbnails
+          )
+          
+          // Store the job ID for potential status checks
+          setJobId(processingResponse.job_id)
+          
+          createAuditEvent('create', {
+            action: 'pptx_processing_started',
+            jobId: processingResponse.job_id,
+            sessionId: newSessionId
+          })
+          
+        } catch (processingError) {
+          console.error("Error processing PPTX:", processingError)
+          createAuditEvent('create', {
+            action: 'pptx_processing_failed',
+            error: processingError instanceof Error ? processingError.message : String(processingError),
+            sessionId: newSessionId
+          })
+          // Note: We don't block the user flow here, they can still proceed to the success step
+          // The processing will happen in the background
+        }
+      }
+      
       setIsCreatingSession(false)
+      setLoading(false)
       setCurrentStep(STEPS.SUCCESS)
+      
     } catch (err) {
       const error = err as Error
       console.error("Error creating session:", error)
       setConfigError("Failed to create session. Please try again.")
       setIsCreatingSession(false)
+      setIsParsing(false)
       setLoading(false)
       setError(error.message)
       
@@ -273,7 +455,7 @@ export default function UploadWizard({ onComplete, supportedLanguages, userId }:
               <div className="space-y-2">
                 <h3 className="text-lg font-medium">Uploading...</h3>
                 <p className="text-sm text-muted-foreground">
-                  {uploadedFile?.file.name} ({Math.round(uploadedFile?.file.size / 1024)} KB)
+                  {uploadedFile?.file.name} ({Math.round(uploadedFile?.file.size || 0) / 1024} KB)
                 </p>
               </div>
             </>
@@ -283,7 +465,7 @@ export default function UploadWizard({ onComplete, supportedLanguages, userId }:
               <div className="space-y-2">
                 <h3 className="text-lg font-medium">Upload Complete!</h3>
                 <p className="text-sm text-muted-foreground">
-                  {uploadedFile.file.name} ({Math.round(uploadedFile.file.size / 1024)} KB)
+                  {uploadedFile.file.name} ({Math.round(uploadedFile.file.size || 0) / 1024} KB)
                 </p>
               </div>
             </>
@@ -323,15 +505,22 @@ export default function UploadWizard({ onComplete, supportedLanguages, userId }:
         </div>
       )}
 
-      <div className="flex justify-end">
-        <Button
-          onClick={handleProceedToConfigure}
-          disabled={!uploadedFile || uploadedFile.progress < 100}
-          className="gap-2"
-        >
-          <span>Continue</span>
-          <ArrowRight className="h-4 w-4" />
-        </Button>
+      <div className="flex justify-between">
+        {isUploading && (
+          <Button variant="outline" onClick={cancelUpload}>
+            Cancel Upload
+          </Button>
+        )}
+        <div className="ml-auto">
+          <Button
+            onClick={handleProceedToConfigure}
+            disabled={!uploadedFile || uploadedFile.progress < 100}
+            className="gap-2"
+          >
+            <span>Continue</span>
+            <ArrowRight className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
     </CardContent>
   )
@@ -390,7 +579,7 @@ export default function UploadWizard({ onComplete, supportedLanguages, userId }:
             <div>
               <p className="font-medium">{uploadedFile?.file.name}</p>
               <p className="text-sm text-muted-foreground">
-                {uploadedFile ? `${Math.round(uploadedFile.file.size / 1024)} KB` : ""}
+                {uploadedFile ? `${Math.round(uploadedFile.file.size || 0) / 1024} KB` : ""}
               </p>
             </div>
           </div>
