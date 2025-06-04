@@ -9,6 +9,27 @@ if not exist "audit-service" (
     exit /b 1
 )
 
+REM Create or update the .env file
+echo Creating/updating .env file with required variables...
+(
+echo PORT=4006
+echo LOG_LEVEL=debug
+echo JWT_SECRET=local-development-secret-key
+echo CORS_ORIGIN=http://localhost:3000
+) > audit-service\.env
+
+REM Check if Supabase values need to be added
+findstr /c:"SUPABASE_URL" audit-service\.env >nul
+if %ERRORLEVEL% neq 0 (
+    echo SUPABASE_URL=https://your-project-id.supabase.co >> audit-service\.env
+    echo SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-key >> audit-service\.env
+    echo SUPABASE_JWT_SECRET=your-supabase-jwt-secret >> audit-service\.env
+    
+    echo Please update audit-service\.env with your actual Supabase credentials.
+    echo Press Ctrl+C to exit or any key to continue...
+    pause >nul
+)
+
 REM Navigate to the audit service directory
 cd audit-service
 
@@ -19,8 +40,8 @@ if %ERRORLEVEL% neq 0 (
     exit /b 1
 )
 
-REM Run the Go service
+REM Run the service using the Makefile's dev target
 echo Running audit service on port 4006...
-cd cmd\server && go run main.go
+make dev
 
 REM This script can be enhanced to include database setup, migrations, etc. 

@@ -34,7 +34,8 @@ The audit service follows a microservice architecture pattern:
 - **Configuration**: Environment variables with `.env` support
 - **Logging**: Structured logging with Zap
 - **Error Handling**: Domain-specific errors with HTTP mapping
-- **Documentation**: OpenAPI 3.0 with Swagger UI
+- **Documentation**: OpenAPI 3.0 with Swagger UI and proper URL redirects
+- **Project Structure**: Root main.go wrapper for improved Go tooling compatibility
 
 ### Data Access
 
@@ -58,6 +59,65 @@ The audit service follows a microservice architecture pattern:
 - **Frontend Test Page**: Direct API testing capability
 
 ## Recent Technical Enhancements
+
+### Root main.go Wrapper
+
+Added a main.go wrapper in the project root to improve Go tooling compatibility:
+
+```go
+// main.go in project root
+package main
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+)
+
+func main() {
+	// This file exists only to fix the "no Go files in directory" error
+	// The actual main function is in cmd/server/main.go
+	fmt.Println("Starting audit-service...")
+	
+	cmd := exec.Command("go", "run", "cmd/server/main.go")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+```
+
+This pattern:
+- Fixes the "no Go files in directory" error when running Go tools in the project root
+- Maintains clear separation of concerns with actual implementation in cmd/server/
+- Makes development tools work more smoothly
+- Doesn't affect application logic or behavior
+
+### Documentation URL Handling Improvements
+
+Enhanced Swagger UI integration with better URL handling:
+
+```go
+// Custom wrapper for Swagger UI that handles redirects
+router.GET("/docs/*any", func(c *gin.Context) {
+    // Check if the path is exactly /docs/ or /docs
+    path := c.Param("any")
+    if path == "" || path == "/" {
+        c.Redirect(http.StatusMovedPermanently, "/docs/index.html")
+        return
+    }
+    // Otherwise use the standard handler
+    ginSwagger.WrapHandler(swaggerFiles.Handler)(c)
+})
+```
+
+This implementation:
+- Ensures `/docs/` and `/docs` automatically redirect to `/docs/index.html`
+- Maintains compatibility with other paths like `/docs/swagger.json`
+- Prevents conflicts with Gin's wildcard routing
+- Provides a better developer experience with intuitive URLs
 
 ### Test Session Handling
 

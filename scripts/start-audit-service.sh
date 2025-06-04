@@ -44,8 +44,8 @@ if ! command -v go &> /dev/null; then
   exit 1
 fi
 
-# Run the Go service
+# Run the service using the Makefile's dev target
 echo "Running audit service on port 4006..."
-cd cmd/server && go run main.go
+make dev
 
 # This script can be enhanced to include database setup, migrations, etc. 

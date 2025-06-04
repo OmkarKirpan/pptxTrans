@@ -151,8 +151,17 @@ func setupRouter(
 	// Health check endpoint
 	router.GET("/health", handleHealth)
 
-	// API documentation
-	router.GET("/docs/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	// Custom wrapper for Swagger UI that handles redirects
+	router.GET("/docs/*any", func(c *gin.Context) {
+		// Check if the path is exactly /docs/ or /docs
+		path := c.Param("any")
+		if path == "" || path == "/" {
+			c.Redirect(http.StatusMovedPermanently, "/docs/index.html")
+			return
+		}
+		// Otherwise use the standard handler
+		ginSwagger.WrapHandler(swaggerFiles.Handler)(c)
+	})
 
 	// Create the events handler
 	auditService := service.NewAuditService(auditRepo, tokenCache, zapLogger)

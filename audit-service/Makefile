@@ -1,4 +1,4 @@
-.PHONY: help build run test test-coverage lint clean docker-build docker-run docs generate-mocks
+.PHONY: help build run test test-coverage lint clean docker-build docker-run docs generate-mocks dev
 
 # Variables
 BINARY_NAME=audit-service
@@ -12,6 +12,7 @@ help:
 	@echo "Available commands:"
 	@echo "  make build          - Build the binary"
 	@echo "  make run           - Run the application locally"
+	@echo "  make dev           - Run the application in development mode (without building)"
 	@echo "  make test          - Run unit tests"
 	@echo "  make test-coverage - Run tests with coverage"
 	@echo "  make lint          - Run linter"
@@ -30,6 +31,11 @@ build: docs
 run: build
 	@echo "Running $(BINARY_NAME)..."
 	./bin/$(BINARY_NAME)
+
+# Run the application in development mode (without building)
+dev:
+	@echo "Running $(BINARY_NAME) in development mode..."
+	cd cmd/server && $(GO) run main.go
 
 # Run unit tests
 test:

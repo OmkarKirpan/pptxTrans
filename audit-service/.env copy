@@ -1,0 +1,16 @@
+# Server configuration
+PORT=4006
+LOG_LEVEL=debug
+CORS_ORIGIN=http://localhost:3000
+
+# JWT configuration (for local testing)
+JWT_SECRET=local-development-secret-key
+
+# Supabase configuration
+SUPABASE_URL=https://yjnbyvttjqhitkwthmbx.supabase.co
+SUPABASE_SERVICE_ROLE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlqbmJ5dnR0anFoaXRrd3RobWJ4Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0ODgwODQ2NSwiZXhwIjoyMDY0Mzg0NDY1fQ.G4Q3-WU0R5rhu9WiJvImknuAvs4dVUiaStB_NytWML4"
+
+SUPABASE_JWT_SECRET="YlvZhabayzAu9o1zx05fY0NlhPlh7SSWk4rb7KczCqHf5eeq/OS8dA2x13CbPK9rF4eDew13iUpUJ5bjAO6Z+Q=="
+
+# Optional: Supabase anon key (if needed)
+SUPABASE_ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlqbmJ5dnR0anFoaXRrd3RobWJ4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDg4MDg0NjUsImV4cCI6MjA2NDM4NDQ2NX0.OCO05CaVvoSEbKFg808w_fPlkxB_r1t5AQoV-I_HsnM"

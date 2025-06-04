@@ -754,4 +754,979 @@ if strings.HasPrefix(sessionID, "test-") {
 
 This pattern enables easy identification of test data throughout the system while maintaining strict validation for production data.
 
---- 
+## Application Architecture
+
+### Domain-Driven Design
+The audit service follows domain-driven design principles, separating business concerns from technical implementation details. The architecture includes:
+
+- **Domain Layer**: Business entities and value objects
+- **Service Layer**: Core business logic and application use cases
+- **Repository Layer**: Data access abstractions
+- **Handler Layer**: HTTP handlers (controllers) for API endpoints
+- **Middleware**: Cross-cutting concerns like authentication, logging, etc.
+
+### Package Structure
+```
+audit-service/                 # Project root
+├── cmd/                       # Application entry points
+│   └── server/                # Main server application
+├── internal/                  # Private application code
+│   ├── config/                # Configuration management
+│   ├── domain/                # Domain models
+│   ├── handlers/              # HTTP handlers
+│   ├── middleware/            # HTTP middleware
+│   ├── repository/            # Data access
+│   └── service/               # Business logic
+├── pkg/                       # Shared packages
+│   ├── cache/                 # Token caching
+│   ├── jwt/                   # JWT validation
+│   └── logger/                # Logging utilities
+├── tests/                     # Test utilities
+│   └── helpers/               # Testing helpers
+├── main.go                    # Root wrapper for Go tooling compatibility
+├── go.mod                     # Go module definition
+└── Makefile                   # Build and development tasks
+```
+
+### Root main.go Pattern
+To ensure Go tooling compatibility (like `go list`, `go mod tidy`, etc.), a main.go file is added to the project root directory. This pattern:
+
+1. Fixes the "no Go files in directory" error
+2. Acts as a simple wrapper to execute the actual application in cmd/server/main.go
+3. Doesn't affect application logic or behavior
+4. Makes development tools work more smoothly
+5. Maintains separation of concerns with actual implementation in cmd/server/
+
+```go
+// Root main.go wrapper pattern
+package main
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+)
+
+func main() {
+	// This file exists only to fix the "no Go files in directory" error
+	// The actual main function is in cmd/server/main.go
+	fmt.Println("Starting audit-service...")
+	
+	cmd := exec.Command("go", "run", "cmd/server/main.go")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+```
+
+### Dependency Injection
+The service uses constructor-based dependency injection for maintainability and testability:
+
+```go
+// Repository layer
+type AuditRepository interface {
+    GetAuditLogs(ctx context.Context, sessionId string, limit, offset int) (*domain.AuditResponse, error)
+    // Other methods...
+}
+
+// Service layer depends on repository
+type AuditService struct {
+    repo   AuditRepository
+    cache  TokenCache
+    logger *zap.Logger
+}
+
+// Constructor injection
+func NewAuditService(repo AuditRepository, cache TokenCache, logger *zap.Logger) *AuditService {
+    return &AuditService{
+        repo:   repo,
+        cache:  cache,
+        logger: logger,
+    }
+}
+```
+
+### Interface-Based Design
+The service extensively uses interfaces to define contracts between layers, enabling:
+
+- Loose coupling between components
+- Easier mocking for tests
+- Flexibility to change implementations
+
+Key interfaces include:
+- `AuditRepository`: Data access abstraction
+- `TokenValidator`: JWT validation contract
+- `TokenCache`: Caching behavior contract
+
+## HTTP Layer
+
+### Gin Framework Integration
+The service uses Gin as the HTTP framework:
+
+```go
+func setupRouter(cfg *config.Config, ...) *gin.Engine {
+    router := gin.New()
+    
+    // Global middleware
+    router.Use(
+        middleware.CORSMiddleware(cfg.CORSOrigin, zapLogger),
+        gin.Recovery(),
+        middleware.RequestID(),
+        middleware.Logger(zapLogger),
+        middleware.ErrorHandler(zapLogger),
+    )
+    
+    // Routes
+    router.GET("/health", handleHealth)
+    
+    // API v1 routes
+    v1 := router.Group("/api/v1")
+    {
+        sessions := v1.Group("/sessions")
+        sessions.Use(middleware.Auth(...))
+        {
+            sessions.GET("/:sessionId/history", auditHandler.GetHistory)
+        }
+    }
+    
+    return router
+}
+```
+
+### Documentation URL Handling Pattern
+To provide a better developer experience when accessing API documentation, a custom wrapper for Swagger UI handles URL redirects:
+
+```go
+// Custom wrapper for Swagger UI that handles redirects
+router.GET("/docs/*any", func(c *gin.Context) {
+    // Check if the path is exactly /docs/ or /docs
+    path := c.Param("any")
+    if path == "" || path == "/" {
+        c.Redirect(http.StatusMovedPermanently, "/docs/index.html")
+        return
+    }
+    // Otherwise use the standard handler
+    ginSwagger.WrapHandler(swaggerFiles.Handler)(c)
+})
+```
+
+This pattern ensures:
+1. `/docs` and `/docs/` automatically redirect to `/docs/index.html`
+2. Other paths like `/docs/swagger.json` still work correctly
+3. No route conflicts with Gin's wildcard handling
+4. Better user experience with intuitive URLs
+
+### Middleware Chain
+The service uses middleware for cross-cutting concerns:
+
+1. **CORS Middleware**: Handles Cross-Origin Resource Sharing
+2. **Request ID Middleware**: Generates a unique ID for each request
+3. **Logger Middleware**: Structured logging for all requests
+4. **Error Handler Middleware**: Consistent error responses
+5. **Auth Middleware**: JWT and share token validation
+
+Example middleware pattern:
+```go
+func RequestID() gin.HandlerFunc {
+    return func(c *gin.Context) {
+        requestID := uuid.New().String()
+        c.Set("requestID", requestID)
+        c.Header("X-Request-ID", requestID)
+        c.Next()
+    }
+}
+```
+
+### Authentication Pattern
+The service supports two authentication methods:
+
+1. **JWT Authentication** (Bearer token)
+   - Extracted from Authorization header
+   - Validated against Supabase JWT secret
+   - User ID extracted from claims
+   
+2. **Share Token Authentication** (URL parameter)
+   - Extracted from `share_token` query parameter
+   - Validated against Supabase `session_shares` table
+   - Limited to specific session access
+
+Authentication flow:
+```go
+func Auth(validator jwt.TokenValidator, cache *cache.TokenCache, repo repository.AuditRepository, logger *zap.Logger) gin.HandlerFunc {
+    return func(c *gin.Context) {
+        // 1. Extract token from header or query param
+        token := extractBearerToken(c) || extractShareToken(c)
+        
+        // 2. Check cache first
+        if cachedUser := cache.Get(token); cachedUser != nil {
+            c.Set("userId", cachedUser.ID)
+            c.Set("sessionAccess", cachedUser.SessionAccess)
+            c.Next()
+            return
+        }
+        
+        // 3. Validate token (JWT or share token)
+        user, err := validateToken(token, validator, repo)
+        if err != nil {
+            c.AbortWithStatusJSON(http.StatusUnauthorized, domain.NewAPIError("unauthorized", "Invalid token"))
+            return
+        }
+        
+        // 4. Cache successful validation
+        cache.Set(token, user)
+        
+        // 5. Set user context for handlers
+        c.Set("userId", user.ID)
+        c.Set("sessionAccess", user.SessionAccess)
+        c.Next()
+    }
+}
+```
+
+## Data Access Layer
+
+### Repository Pattern
+The service uses the repository pattern to abstract data access:
+
+```go
+type AuditRepository interface {
+    GetAuditLogs(ctx context.Context, sessionId string, limit, offset int) (*domain.AuditResponse, error)
+    ValidateSessionAccess(ctx context.Context, sessionId, userId string) (bool, error)
+    ValidateShareToken(ctx context.Context, shareToken string) (*domain.TokenUser, error)
+}
+
+type auditRepository struct {
+    client *SupabaseClient
+    logger *zap.Logger
+}
+```
+
+### Supabase REST Client
+Data access is implemented using Supabase REST API:
+
+```go
+func (r *auditRepository) GetAuditLogs(ctx context.Context, sessionId string, limit, offset int) (*domain.AuditResponse, error) {
+    url := fmt.Sprintf("%s/rest/v1/audit_logs?select=*&session_id=eq.%s&order=timestamp.desc&limit=%d&offset=%d",
+        r.client.baseURL, url.QueryEscape(sessionId), limit, offset)
+    
+    req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+    if err != nil {
+        return nil, err
+    }
+    
+    // Add Supabase headers
+    r.client.addHeaders(req)
+    req.Header.Add("Prefer", "count=exact")
+    
+    resp, err := r.client.httpClient.Do(req)
+    // ... handle response and errors
+}
+```
+
+### HTTP Client Configuration
+The service uses a properly configured HTTP client for optimal performance:
+
+```go
+func NewSupabaseClient(cfg *config.Config, logger *zap.Logger) *SupabaseClient {
+    return &SupabaseClient{
+        baseURL: cfg.SupabaseURL,
+        apiKey: cfg.SupabaseServiceRoleKey,
+        httpClient: &http.Client{
+            Timeout: 30 * time.Second,
+            Transport: &http.Transport{
+                MaxIdleConns:        100,
+                MaxIdleConnsPerHost: 10,
+                IdleConnTimeout:     90 * time.Second,
+            },
+        },
+        logger: logger,
+    }
+}
+```
+
+### Test Session Handling
+For development and testing, the service implements special handling for test session IDs:
+
+```go
+func (r *auditRepository) GetAuditLogs(ctx context.Context, sessionId string, limit, offset int) (*domain.AuditResponse, error) {
+    // Special handling for test session IDs
+    if strings.HasPrefix(sessionId, "test-") {
+        return r.getTestAuditLogs(sessionId, limit, offset), nil
+    }
+    
+    // Normal database access for production sessions
+    // ...
+}
+```
+
+## Service Layer
+
+### Business Logic Encapsulation
+The service layer encapsulates all business logic:
+
+```go
+func (s *AuditService) GetAuditHistory(ctx context.Context, sessionId string, userId string, limit, offset int) (*domain.AuditResponse, error) {
+    // 1. Input validation
+    if sessionId == "" {
+        return nil, domain.NewAPIError("invalid_session_id", "Session ID is required")
+    }
+    
+    // 2. Authorization check (unless test session)
+    if !strings.HasPrefix(sessionId, "test-") {
+        hasAccess, err := s.repo.ValidateSessionAccess(ctx, sessionId, userId)
+        if err != nil {
+            s.logger.Error("failed to validate session access", zap.Error(err))
+            return nil, domain.NewAPIError("internal_error", "Failed to validate access")
+        }
+        if !hasAccess {
+            return nil, domain.NewAPIError("forbidden", "You do not have access to this session")
+        }
+    }
+    
+    // 3. Retrieve audit logs
+    result, err := s.repo.GetAuditLogs(ctx, sessionId, limit, offset)
+    if err != nil {
+        s.logger.Error("failed to get audit logs", zap.Error(err))
+        return nil, domain.NewAPIError("internal_error", "Failed to retrieve audit logs")
+    }
+    
+    return result, nil
+}
+```
+
+### Domain Error Handling
+The service uses domain errors to convey business rule violations:
+
+```go
+// Domain error type
+type APIError struct {
+    Code    string `json:"error"`
+    Message string `json:"message"`
+}
+
+// Create domain error in service layer
+if !hasAccess {
+    return nil, domain.NewAPIError("forbidden", "You do not have access to this session")
+}
+
+// Handle domain error in HTTP layer (middleware)
+func ErrorHandler(logger *zap.Logger) gin.HandlerFunc {
+    return func(c *gin.Context) {
+        c.Next()
+        
+        if len(c.Errors) > 0 {
+            err := c.Errors.Last().Err
+            
+            // Check for domain errors
+            if apiErr, ok := err.(*domain.APIError); ok {
+                statusCode := getStatusCodeForErrorCode(apiErr.Code)
+                c.JSON(statusCode, apiErr)
+                return
+            }
+            
+            // Generic error handling
+            logger.Error("unexpected error", zap.Error(err))
+            c.JSON(http.StatusInternalServerError, domain.NewAPIError("internal_error", "An unexpected error occurred"))
+        }
+    }
+}
+```
+
+## Caching
+
+### Token Caching
+The service uses in-memory caching for validated tokens:
+
+```go
+type TokenCache struct {
+    cache *cache.Cache
+}
+
+func NewTokenCache(jwtTTL, shareTokenTTL, cleanupInterval time.Duration) *TokenCache {
+    return &TokenCache{
+        cache: cache.New(jwtTTL, cleanupInterval),
+    }
+}
+
+func (tc *TokenCache) Get(token string) *domain.TokenUser {
+    if item, found := tc.cache.Get(token); found {
+        return item.(*domain.TokenUser)
+    }
+    return nil
+}
+
+func (tc *TokenCache) Set(token string, user *domain.TokenUser, ttl time.Duration) {
+    tc.cache.Set(token, user, ttl)
+}
+```
+
+### Tiered Cache Pattern
+The authentication middleware uses a tiered approach:
+1. First check cache for token
+2. If not found, validate token cryptographically
+3. For share tokens, query database
+4. Cache successful validations
+
+## Configuration Management
+
+### Viper + Environment Variables
+The service uses Viper for flexible configuration:
+
+```go
+func Load() (*Config, error) {
+    viper.SetEnvPrefix("AUDIT")
+    viper.AutomaticEnv()
+    
+    // Defaults
+    viper.SetDefault("PORT", "4006")
+    viper.SetDefault("LOG_LEVEL", "info")
+    viper.SetDefault("CORS_ORIGIN", "*")
+    viper.SetDefault("CACHE_JWT_TTL", "5m")
+    viper.SetDefault("CACHE_SHARE_TOKEN_TTL", "1m")
+    viper.SetDefault("CACHE_CLEANUP_INTERVAL", "10m")
+    
+    // Environment file
+    viper.SetConfigName(".env")
+    viper.SetConfigType("env")
+    viper.AddConfigPath(".")
+    if err := viper.ReadInConfig(); err != nil {
+        if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+            return nil, fmt.Errorf("failed to load .env file: %w", err)
+        }
+        // Continue with environment variables only
+    }
+    
+    // Map to struct
+    var cfg Config
+    if err := viper.Unmarshal(&cfg); err != nil {
+        return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+    }
+    
+    // Validate required fields
+    if err := cfg.Validate(); err != nil {
+        return nil, err
+    }
+    
+    return &cfg, nil
+}
+```
+
+## Logging
+
+### Structured Logging with Zap
+The service uses Zap for structured, performant logging:
+
+```go
+func New(level string) (*zap.Logger, error) {
+    var zapLevel zapcore.Level
+    if err := zapLevel.UnmarshalText([]byte(level)); err != nil {
+        return nil, fmt.Errorf("invalid log level: %s", level)
+    }
+    
+    logConfig := zap.Config{
+        Level:            zap.NewAtomicLevelAt(zapLevel),
+        Encoding:         "json",
+        OutputPaths:      []string{"stdout"},
+        ErrorOutputPaths: []string{"stderr"},
+        EncoderConfig: zapcore.EncoderConfig{
+            MessageKey:     "message",
+            LevelKey:       "level",
+            TimeKey:        "timestamp",
+            NameKey:        "logger",
+            CallerKey:      "caller",
+            FunctionKey:    zapcore.OmitKey,
+            StacktraceKey:  "stacktrace",
+            LineEnding:     zapcore.DefaultLineEnding,
+            EncodeLevel:    zapcore.LowercaseLevelEncoder,
+            EncodeTime:     zapcore.ISO8601TimeEncoder,
+            EncodeDuration: zapcore.StringDurationEncoder,
+            EncodeCaller:   zapcore.ShortCallerEncoder,
+        },
+    }
+    
+    return logConfig.Build()
+}
+```
+
+### Request Logging Pattern
+Each HTTP request is logged with contextual information:
+
+```go
+func Logger(logger *zap.Logger) gin.HandlerFunc {
+    return func(c *gin.Context) {
+        start := time.Now()
+        path := c.Request.URL.Path
+        
+        // Process request
+        c.Next()
+        
+        // Log after request
+        latency := time.Since(start)
+        status := c.Writer.Status()
+        requestID, _ := c.Get("requestID")
+        clientIP := c.ClientIP()
+        method := c.Request.Method
+        userAgent := c.Request.UserAgent()
+        
+        logFunc := logger.Info
+        if status >= 400 {
+            logFunc = logger.Warn
+        }
+        if status >= 500 {
+            logFunc = logger.Error
+        }
+        
+        logFunc("request completed",
+            zap.String("request_id", requestID.(string)),
+            zap.String("method", method),
+            zap.String("path", path),
+            zap.String("ip", clientIP),
+            zap.Int("status", status),
+            zap.Duration("latency", latency),
+            zap.String("user_agent", userAgent),
+        )
+    }
+}
+```
+
+## Documentation
+
+### OpenAPI Documentation
+The service automatically generates OpenAPI documentation:
+
+```go
+// @title Audit Service API
+// @version 1.0.0
+// @description A read-only microservice for accessing PowerPoint translation session audit logs
+
+// @contact.name API Support
+// @contact.url http://www.swagger.io/support
+// @contact.email support@swagger.io
+
+// @license.name MIT
+// @license.url https://opensource.org/licenses/MIT
+
+// @host localhost:4006
+// @BasePath /api/v1
+
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+// @description Type "Bearer" followed by a space and JWT token.
+```
+
+### API Documentation Routes
+The service provides interactive API documentation:
+
+```go
+// API documentation routes with custom redirect handling
+router.GET("/docs/*any", func(c *gin.Context) {
+    // Check if the path is exactly /docs/ or /docs
+    path := c.Param("any")
+    if path == "" || path == "/" {
+        c.Redirect(http.StatusMovedPermanently, "/docs/index.html")
+        return
+    }
+    // Otherwise use the standard handler
+    ginSwagger.WrapHandler(swaggerFiles.Handler)(c)
+})
+```
+
+## Testing
+
+### Table-Driven Tests
+Tests are structured as table-driven tests for comprehensive coverage:
+
+```go
+func TestAuditRepository_GetAuditLogs(t *testing.T) {
+    tests := []struct {
+        name       string
+        sessionId  string
+        limit      int
+        offset     int
+        setupMock  func(*httptest.Server) *httptest.Server
+        want       *domain.AuditResponse
+        wantErr    bool
+        errCode    string
+    }{
+        {
+            name:      "success",
+            sessionId: "session-123",
+            limit:     10,
+            offset:    0,
+            setupMock: func(server *httptest.Server) *httptest.Server {
+                handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+                    // Mock response
+                })
+                return httptest.NewServer(handler)
+            },
+            want: &domain.AuditResponse{
+                TotalCount: 2,
+                Items: []domain.AuditEntry{
+                    // Expected items
+                },
+            },
+            wantErr: false,
+        },
+        // More test cases...
+    }
+    
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            // Test implementation
+        })
+    }
+}
+```
+
+### Interface Mocking
+The service uses Mockery to generate mocks for interfaces:
+
+```go
+// mockery --name=AuditRepository
+type MockAuditRepository struct {
+    mock.Mock
+}
+
+func (_m *MockAuditRepository) GetAuditLogs(ctx context.Context, sessionId string, limit int, offset int) (*domain.AuditResponse, error) {
+    ret := _m.Called(ctx, sessionId, limit, offset)
+    
+    var r0 *domain.AuditResponse
+    if rf, ok := ret.Get(0).(func(context.Context, string, int, int) *domain.AuditResponse); ok {
+        r0 = rf(ctx, sessionId, limit, offset)
+    } else {
+        if ret.Get(0) != nil {
+            r0 = ret.Get(0).(*domain.AuditResponse)
+        }
+    }
+    
+    var r1 error
+    if rf, ok := ret.Get(1).(func(context.Context, string, int, int) error); ok {
+        r1 = rf(ctx, sessionId, limit, offset)
+    } else {
+        r1 = ret.Error(1)
+    }
+    
+    return r0, r1
+}
+```
+
+## Build System
+
+### Makefile Automation
+The service uses a Makefile for common tasks:
+
+```makefile
+.PHONY: help build run test test-coverage lint clean docker-build docker-run docs generate-mocks
+
+# Build the binary
+build: docs
+	@echo "Building $(BINARY_NAME)..."
+	$(GO) build $(GOFLAGS) -ldflags="$(LDFLAGS)" -o bin/$(BINARY_NAME) cmd/server/main.go
+
+# Generate OpenAPI documentation
+docs:
+	@echo "Generating OpenAPI documentation..."
+	swag init -g cmd/server/main.go -o docs
+
+# Generate mocks for testing
+generate-mocks:
+	@echo "Generating mocks..."
+	mockery --all
+```
+
+## Containerization
+
+### Docker Build
+The service is containerized with Docker:
+
+```dockerfile
+FROM golang:1.18-alpine AS builder
+
+WORKDIR /app
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN go build -ldflags="-w -s" -o /app/bin/audit-service cmd/server/main.go
+
+FROM alpine:3.15
+
+WORKDIR /app
+
+COPY --from=builder /app/bin/audit-service .
+
+# Add CA certificates for HTTPS calls
+RUN apk --no-cache add ca-certificates
+
+EXPOSE 4006
+
+CMD ["./audit-service"]
+```
+
+## Deployment Patterns
+
+### Environment Configuration
+The service uses environment variables for deployment configuration:
+
+```
+# .env.example
+PORT=4006
+LOG_LEVEL=debug
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+SUPABASE_JWT_SECRET=your-jwt-secret
+CORS_ORIGIN=http://localhost:3000
+CACHE_JWT_TTL=5m
+CACHE_SHARE_TOKEN_TTL=1m
+CACHE_CLEANUP_INTERVAL=10m
+```
+
+### Docker Compose
+For local development and testing:
+
+```yaml
+version: "3.8"
+services:
+  audit-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "4006:4006"
+    environment:
+      - PORT=4006
+      - LOG_LEVEL=debug
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET}
+      - CORS_ORIGIN=http://localhost:3000
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4006/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+```
+
+## Frontend Integration
+
+### Client-Side Authentication
+Frontend integration with the audit service:
+
+```typescript
+const getAuditLogs = async (sessionId: string, page: number = 1) => {
+  const { data: session } = await supabase.auth.getSession();
+  const token = session?.access_token;
+  
+  if (!token) {
+    throw new Error('Not authenticated');
+  }
+  
+  const response = await fetch(
+    `${AUDIT_SERVICE_URL}/api/v1/sessions/${sessionId}/history?limit=20&offset=${(page-1)*20}`,
+    {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    }
+  );
+  
+  if (!response.ok) {
+    throw new Error('Failed to fetch audit logs');
+  }
+  
+  return response.json();
+};
+```
+
+### Error Handling
+Standard error response handling pattern:
+
+```typescript
+try {
+  const auditLogs = await getAuditLogs(sessionId);
+  setLogs(auditLogs.items);
+  setTotalCount(auditLogs.totalCount);
+} catch (error) {
+  if (error.response && error.response.status === 401) {
+    // Handle authentication error
+    setAuthError(true);
+  } else if (error.response && error.response.status === 403) {
+    // Handle authorization error
+    setAccessError(true);
+  } else {
+    // Handle other errors
+    setError('Failed to load audit logs');
+  }
+}
+```
+
+## Key Project Decisions
+
+### Supabase Direct Integration
+The service directly integrates with Supabase REST API instead of using an SDK:
+
+1. **Pros**:
+   - No additional dependencies on SDK
+   - Full control over requests and responses
+   - More explicit error handling
+   
+2. **Cons**:
+   - More boilerplate code
+   - Manual maintenance of API integration
+   - Need to handle connection pooling
+
+### JWT Validation
+The service implements its own JWT validation:
+
+1. **Pros**:
+   - No dependency on Supabase SDK
+   - Can customize validation rules
+   - Token caching for performance
+   
+2. **Cons**:
+   - Need to keep up with JWT standards
+   - Potential security issues if implemented incorrectly
+
+### In-Memory Test Session Storage
+Special handling for test sessions with in-memory storage:
+
+1. **Pros**:
+   - No database dependency for testing
+   - Faster test execution
+   - Isolated test environment
+   
+2. **Cons**:
+   - Different behavior in test vs. production
+   - Potential memory leaks if not managed properly
+   - Non-persistent test data
+
+### Design Decisions Reasoning
+1. **REST API instead of SDK**: Chosen for simplicity and control
+2. **JWT Validation**: Implemented to reduce dependencies
+3. **In-Memory Test Storage**: Added for easier integration testing
+4. **Root main.go Wrapper**: Added to fix Go tooling compatibility
+5. **Custom Documentation URL Handling**: Improved developer experience
+
+## Performance Optimizations
+
+### HTTP Connection Pooling
+The service optimizes HTTP connections:
+
+```go
+httpClient: &http.Client{
+    Timeout: 30 * time.Second,
+    Transport: &http.Transport{
+        MaxIdleConns:        100,
+        MaxIdleConnsPerHost: 10,
+        IdleConnTimeout:     90 * time.Second,
+    },
+},
+```
+
+### Token Caching
+JWT and share token validation results are cached:
+
+```go
+// Cache successful validation
+if isValid {
+    ttl := tc.jwtTTL
+    if isShareToken {
+        ttl = tc.shareTokenTTL
+    }
+    tc.cache.Set(token, user, ttl)
+}
+```
+
+### Pagination
+API endpoints implement pagination to limit response size:
+
+```go
+// GetHistory godoc
+// @Summary Get audit history for a session
+// @Description Get paginated audit logs for a specific session
+// @Tags sessions
+// @Accept json
+// @Produce json
+// @Param sessionId path string true "Session ID"
+// @Param limit query int false "Number of items per page" default(50) minimum(1) maximum(100)
+// @Param offset query int false "Offset for pagination" default(0) minimum(0)
+// @Success 200 {object} domain.AuditResponse
+// @Failure 400 {object} domain.APIError
+// @Failure 401 {object} domain.APIError
+// @Failure 403 {object} domain.APIError
+// @Failure 404 {object} domain.APIError
+// @Failure 500 {object} domain.APIError
+// @Router /sessions/{sessionId}/history [get]
+// @Security BearerAuth
+func (h *AuditHandler) GetHistory(c *gin.Context) {
+    // Parse pagination parameters
+    limit := 50
+    offset := 0
+    
+    if limitParam := c.Query("limit"); limitParam != "" {
+        parsedLimit, err := strconv.Atoi(limitParam)
+        if err == nil && parsedLimit > 0 {
+            if parsedLimit > 100 {
+                limit = 100 // Maximum limit
+            } else {
+                limit = parsedLimit
+            }
+        }
+    }
+    
+    if offsetParam := c.Query("offset"); offsetParam != "" {
+        parsedOffset, err := strconv.Atoi(offsetParam)
+        if err == nil && parsedOffset >= 0 {
+            offset = parsedOffset
+        }
+    }
+    
+    // Get audit logs with pagination
+    result, err := h.service.GetAuditHistory(c.Request.Context(), sessionId, userId, limit, offset)
+    // ...
+}
+```
+
+## Security Practices
+
+### Service Role Key Management
+The service uses the Supabase service role key securely:
+
+1. Stored as environment variable
+2. Never exposed to clients
+3. Used only for server-to-server communication
+
+### JWT Secret Management
+JWT secret handling:
+
+1. Stored as environment variable
+2. Used for local token validation
+3. Protected from exposure in logs
+
+### Bearer Token Validation
+Token validation flow:
+
+1. Extract token from Authorization header
+2. Validate JWT signature
+3. Check token expiration
+4. Verify claims (iss, aud)
+5. Extract user ID and permissions
+
+### Error Message Security
+Error messages are carefully designed:
+
+1. Specific errors for client issues (400-level)
+2. Generic errors for server issues (500-level)
+3. No exposure of internal details
+4. Detailed logging for debugging
+
+---
+
+*Last Updated: June 2025 - Added Root main.go pattern and Documentation URL handling* 

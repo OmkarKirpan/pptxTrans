@@ -1,9 +1,11 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server"
 import DashboardHeader from "@/components/dashboard/dashboard-header"
 import SessionCard from "@/components/dashboard/session-card"
+import AuditedSessionCard from "@/components/dashboard/audited-session-card"
 import EmptyState from "@/components/dashboard/empty-state"
-import type { TranslationSession } from "@/types"
+import type { TranslationSession, SessionStatus } from "@/types"
 import { redirect } from "next/navigation" // For redirecting if not authenticated
+import { createServerAuditEvent } from "@/lib/services/server-audit-logger"
 
 export default async function DashboardPage() {
   const supabase = await createSupabaseServerClient()
@@ -37,23 +39,88 @@ export default async function DashboardPage() {
     )
   }
 
-  const sessions: TranslationSession[] = sessionsData || []
+  // Convert database result to TranslationSession[] type
+  const sessions: TranslationSession[] = (sessionsData || []).map(session => ({
+    ...session,
+    status: session.status as SessionStatus, // Type assertion for status
+  }))
 
-  // Mock functions for SessionCard actions
+  // Server actions with audit logging
   const handleShare = async (sessionId: string) => {
     "use server"
-    console.log("Share session:", sessionId)
-    // Implement share logic
+    
+    try {
+      console.log("Share session:", sessionId)
+      // Implement share logic
+      
+      // Find the session to get additional details for audit log
+      const session = sessions.find(s => s.id === sessionId)
+      
+      // Log the share action server-side
+      await createServerAuditEvent(
+        sessionId,
+        'share',
+        {
+          action: 'share_session_server',
+          sessionName: session?.name || 'Unknown session',
+          userId: user.id,
+        }
+      )
+    } catch (error) {
+      console.error("Error sharing session:", error)
+    }
   }
+  
   const handleExport = async (sessionId: string) => {
     "use server"
-    console.log("Export session:", sessionId)
-    // Implement export logic
+    
+    try {
+      console.log("Export session:", sessionId)
+      // Implement export logic
+      
+      // Find the session to get additional details for audit log
+      const session = sessions.find(s => s.id === sessionId)
+      
+      // Log the export action server-side
+      await createServerAuditEvent(
+        sessionId,
+        'export',
+        {
+          action: 'export_session_server',
+          sessionName: session?.name || 'Unknown session',
+          slideCount: session?.slide_count || 0,
+          format: 'pptx',
+          userId: user.id,
+        }
+      )
+    } catch (error) {
+      console.error("Error exporting session:", error)
+    }
   }
+  
   const handleDelete = async (sessionId: string) => {
     "use server"
-    console.log("Delete session:", sessionId)
-    // Implement delete logic, e.g., call Supabase to delete
+    
+    try {
+      console.log("Delete session:", sessionId)
+      // Implement delete logic, e.g., call Supabase to delete
+      
+      // Find the session to get additional details for audit log
+      const session = sessions.find(s => s.id === sessionId)
+      
+      // Log the delete action server-side
+      await createServerAuditEvent(
+        sessionId,
+        'create', // Using 'create' type since there's no 'delete' in AuditAction
+        {
+          action: 'delete_session_server',
+          sessionName: session?.name || 'Unknown session',
+          userId: user.id,
+        }
+      )
+    } catch (error) {
+      console.error("Error deleting session:", error)
+    }
   }
 
   return (
@@ -65,14 +132,11 @@ export default async function DashboardPage() {
         ) : (
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {sessions.map((session) => (
-              <SessionCard
+              <AuditedSessionCard
                 key={session.id}
                 session={session}
-                // @ts-expect-error Server Action type mismatch for client component prop
                 onShare={handleShare}
-                // @ts-expect-error Server Action type mismatch for client component prop
                 onExport={handleExport}
-                // @ts-expect-error Server Action type mismatch for client component prop
                 onDelete={handleDelete}
               />
             ))}

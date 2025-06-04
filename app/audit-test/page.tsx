@@ -12,6 +12,7 @@ import { AuditAction } from '@/types/audit';
 import { createClient } from '@/lib/supabase/client';
 import { useAuditLog } from '@/hooks/useAuditLog';
 import { Loader2 } from 'lucide-react';
+import Link from "next/link"
 
 export default function AuditTestPage() {
   const supabase = createClient();
@@ -122,177 +123,51 @@ export default function AuditTestPage() {
   }
 
   return (
-    <div className="container mx-auto py-10">
-      <h1 className="text-3xl font-bold mb-8">Audit Service Test</h1>
+    <div className="container py-10">
+      <h1 className="text-2xl font-bold mb-6">Audit Service Test Tools</h1>
+      <p className="text-muted-foreground mb-8">
+        This section provides tools to test and verify the integration with the Audit Service.
+      </p>
       
-      <Tabs defaultValue="send">
-        <TabsList className="mb-6">
-          <TabsTrigger value="send">Send Events</TabsTrigger>
-          <TabsTrigger value="view">View Events</TabsTrigger>
-          <TabsTrigger value="health">Service Health</TabsTrigger>
-        </TabsList>
+      <div className="grid gap-6 md:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Integration Test</CardTitle>
+            <CardDescription>
+              Test the integration between the frontend and the Audit Service
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground mb-4">
+              This test page allows you to create and view audit events for test sessions.
+              It helps verify that the frontend components are correctly integrated with the Audit Service.
+            </p>
+          </CardContent>
+          <CardFooter>
+            <Link href="/audit-test/integration" passHref>
+              <Button>Go to Integration Test</Button>
+            </Link>
+          </CardFooter>
+        </Card>
         
-        <TabsContent value="send">
-          <Card>
-            <CardHeader>
-              <CardTitle>Send Test Audit Event</CardTitle>
-              <CardDescription>
-                Send test events to the audit service to verify the integration
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="session-id">Session ID</Label>
-                <Input 
-                  id="session-id" 
-                  value={sessionId} 
-                  onChange={(e) => setSessionId(e.target.value)}
-                  placeholder="Enter a session ID"
-                />
-              </div>
-              
-              <div className="space-y-2">
-                <Label htmlFor="action-type">Event Type</Label>
-                <Select value={selectedAction} onValueChange={(value) => setSelectedAction(value as AuditAction)}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select an event type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="create">Create</SelectItem>
-                    <SelectItem value="edit">Edit</SelectItem>
-                    <SelectItem value="view">View</SelectItem>
-                    <SelectItem value="merge">Merge</SelectItem>
-                    <SelectItem value="comment">Comment</SelectItem>
-                    <SelectItem value="export">Export</SelectItem>
-                    <SelectItem value="share">Share</SelectItem>
-                    <SelectItem value="unshare">Unshare</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              
-              <div className="space-y-2">
-                <Label htmlFor="event-details">Event Details (JSON)</Label>
-                <Textarea 
-                  id="event-details" 
-                  value={details} 
-                  onChange={(e) => setDetails(e.target.value)}
-                  placeholder='{"slideId": "slide-1", "textId": "text-1", "before": "Hello", "after": "Hello World"}'
-                  rows={5}
-                />
-              </div>
-              
-              <div className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  id="direct-api"
-                  checked={directApiTest}
-                  onChange={(e) => setDirectApiTest(e.target.checked)}
-                  className="rounded border-gray-300 text-primary focus:ring-primary"
-                />
-                <Label htmlFor="direct-api" className="text-sm font-normal">
-                  Test direct API call to /api/v1/events endpoint
-                </Label>
-              </div>
-            </CardContent>
-            <CardFooter className="flex-col items-start space-y-4">
-              <Button onClick={sendTestEvent}>Send Test Event</Button>
-              
-              {testOutput && (
-                <div className="w-full p-4 border rounded-md bg-muted text-sm">
-                  <p className="font-mono">{testOutput}</p>
-                </div>
-              )}
-            </CardFooter>
-          </Card>
-        </TabsContent>
-        
-        <TabsContent value="view">
-          <Card>
-            <CardHeader>
-              <CardTitle>View Audit Events</CardTitle>
-              <CardDescription>
-                View audit events for the specified session ID
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex gap-4 mb-6">
-                <div className="flex-1">
-                  <Label htmlFor="view-session-id">Session ID</Label>
-                  <Input 
-                    id="view-session-id" 
-                    value={sessionId} 
-                    onChange={(e) => setSessionId(e.target.value)}
-                    placeholder="Enter a session ID"
-                  />
-                </div>
-                <Button className="self-end" onClick={() => refresh()}>
-                  Refresh
-                </Button>
-              </div>
-              
-              {isLoading ? (
-                <div className="flex justify-center py-8">
-                  <Loader2 className="h-8 w-8 animate-spin" />
-                </div>
-              ) : error ? (
-                <div className="p-4 border border-destructive rounded-md text-destructive">
-                  Error: {error}
-                </div>
-              ) : auditLogs.length === 0 ? (
-                <div className="p-4 border rounded-md text-center text-muted-foreground">
-                  No audit logs found for this session ID
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  <p className="text-sm text-muted-foreground">Found {totalCount} events, showing page {currentPage}</p>
-                  
-                  {auditLogs.map((log) => (
-                    <div key={log.id} className="p-4 border rounded-md">
-                      <div className="flex justify-between mb-2">
-                        <span className="font-medium">{log.action}</span>
-                        <span className="text-sm text-muted-foreground">{new Date(log.timestamp).toLocaleString()}</span>
-                      </div>
-                      <pre className="text-xs bg-muted p-2 rounded-md overflow-auto">
-                        {JSON.stringify(log.details, null, 2)}
-                      </pre>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-        
-        <TabsContent value="health">
-          <Card>
-            <CardHeader>
-              <CardTitle>Audit Service Health</CardTitle>
-              <CardDescription>
-                Check if the audit service is running and accessible
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="service-url">Service URL</Label>
-                <Input 
-                  id="service-url" 
-                  value={serviceUrl} 
-                  onChange={(e) => setServiceUrl(e.target.value)}
-                  placeholder="http://localhost:4006"
-                />
-              </div>
-              
-              <Button onClick={checkHealth}>Check Health</Button>
-              
-              {healthStatus && (
-                <div className="p-4 border rounded-md bg-muted mt-4">
-                  <p>{healthStatus}</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+        <Card>
+          <CardHeader>
+            <CardTitle>Component Test</CardTitle>
+            <CardDescription>
+              Test individual components with audit logging capabilities
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground mb-4">
+              This page allows you to test the audit logging functionality of specific UI components
+              in isolation, such as the SessionCard, SlideCanvas, and text editor.
+            </p>
+          </CardContent>
+          <CardFooter>
+            <Button variant="outline" disabled>Coming Soon</Button>
+          </CardFooter>
+        </Card>
+      </div>
     </div>
   );
 } 
