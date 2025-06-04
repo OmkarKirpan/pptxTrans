@@ -11,6 +11,15 @@ Translating PowerPoint presentations can be a tedious task, often leading to for
 *   💬 **Facilitating Collaboration:** Allows users to comment directly on text elements within the slide context (future feature).
 *   ⏱️ **Increasing Efficiency:** Reduces the manual effort involved in traditional translation methods.
 
+## 📚 Documentation
+
+This project includes comprehensive integration documentation to help you understand and work with the different components:
+
+* **[Frontend Service Integration Guide](docs/service-integration.md)** - How to integrate the Next.js frontend with both microservices
+* **[PPTX Processor Service Integration Guide](pptx-processor-service/docs/integration-guide.md)** - API endpoints and integration details for the PPTX processing service
+* **[Audit Service Integration Guide](audit-service/docs/integration-guide.md)** - API endpoints and integration details for the audit logging service
+* **Memory Bank** - Comprehensive project documentation in the `memory-bank/` directory
+
 ## 🔑 Key Features
 
 *   👤 **User Authentication:** Secure login and signup using Supabase Auth.

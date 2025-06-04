@@ -15,6 +15,10 @@ A Go-based microservice providing read-only access to audit logs for PowerPoint 
 - Health check endpoint
 - Event creation API for tracking user actions
 
+## Integration Guide
+
+For detailed information on integrating with the Audit Service, see the [Integration Guide](docs/integration-guide.md).
+
 ## Architecture
 
 The service follows Domain-Driven Design (DDD) principles with clear separation of concerns:

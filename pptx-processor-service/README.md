@@ -10,6 +10,10 @@ A simple microservice for converting PowerPoint presentations to SVGs and extrac
 - Provide metadata for text display in slidecanvas frontend component
 - Store processed assets in Supabase Storage (configured via environment variables)
 
+## Integration Guide
+
+For detailed information on integrating with the PPTX Processor Service, see the [Integration Guide](docs/integration-guide.md).
+
 ## Getting Started
 
 ### Prerequisites
