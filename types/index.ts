@@ -40,6 +40,9 @@ export interface SlideShape {
   has_comments: boolean
   created_at: string
   updated_at: string
+  // UI state flags - not persisted to database
+  _pendingUpdate?: boolean // Flag for optimistic updates
+  _localChanges?: boolean // Flag for changes made locally but not yet synchronized
 }
 
 export interface ProcessedSlide {
@@ -52,6 +55,8 @@ export interface ProcessedSlide {
   created_at: string
   updated_at: string
   shapes: SlideShape[]
+  // UI state flags - not persisted to database
+  _pendingSync?: boolean // Flag indicating slide is being synced
 }
 
 export interface UploadedFile {

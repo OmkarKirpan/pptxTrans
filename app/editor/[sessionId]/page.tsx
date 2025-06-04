@@ -16,6 +16,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { useAuditLog } from "@/hooks/useAuditLog" // Import audit log hook
+import { SyncStatusIndicator } from "@/components/editor/sync-status-indicator"
+import { useRealTimeSync } from "@/lib/services/realtime-sync"
 
 // Import Zustand hooks
 import { useSession, useSlides, useEditBuffers } from "@/lib/store"
@@ -118,6 +120,7 @@ export default function SlideEditorPage() {
   const params = useParams()
   const router = useRouter()
   const supabase = createClient()
+  const { subscribeToSession, unsubscribeFromSession } = useRealTimeSync()
 
   const sessionId = params.sessionId as string
   
@@ -144,7 +147,8 @@ export default function SlideEditorPage() {
     slidesLoading,
     setSlidesLoading,
     slidesError,
-    setSlidesError
+    setSlidesError,
+    updateShape
   } = useSlides()
   
   const {
@@ -217,7 +221,15 @@ export default function SlideEditorPage() {
     if (sessionId) {
       fetchData()
     }
-  }, [sessionId, supabase, router, createAuditEvent, setSession, setSlides, setCurrentSlide, setSessionLoading, setSlidesLoading, setSessionError])
+
+    // Subscribe to real-time updates when the component mounts
+    subscribeToSession(sessionId)
+
+    // Cleanup function to unsubscribe when the component unmounts
+    return () => {
+      unsubscribeFromSession(sessionId)
+    }
+  }, [sessionId, supabase, router, createAuditEvent, setSession, setSlides, setCurrentSlide, setSessionLoading, setSlidesLoading, setSessionError, subscribeToSession, unsubscribeFromSession])
 
   const handleSelectSlide = (slideId: string) => {
     setCurrentSlide(slideId)
@@ -249,41 +261,33 @@ export default function SlideEditorPage() {
   }
 
   const handleSaveTranslation = async () => {
-    if (!currentSlide || !activeBufferId || !activeBuffer) return
-
+    if (!activeBuffer || !activeBufferId) return
+    
     try {
-      // Find the shape in the current slide
-      const shape = currentSlide.shapes.find(sh => sh.id === activeBufferId)
-      if (!shape) return
+      // Get the active buffer and corresponding shape/slide info
+      const { slideId, translatedText } = activeBuffer
       
-      // Create new shape with updated translation
-      const updatedShape = {
-        ...shape,
-        translated_text: activeBuffer.translatedText
-      }
+      // Use the optimistic update method from the slides slice
+      await updateShape(slideId, activeBufferId, {
+        translated_text: translatedText
+      })
       
-      // Update slide shapes in the store
-      const updatedShapes = currentSlide.shapes.map(sh => 
-        sh.id === activeBufferId ? updatedShape : sh
-      )
-      
-      updateSlideShapes(currentSlide.id, updatedShapes)
-      
-      // Save buffer (marks as not dirty)
+      // Save the buffer (marks it as not dirty)
       saveBuffer(activeBufferId)
       
-      // Close editor
-      setActiveBuffer(null)
-
-      // Log translation save
+      // Create audit event for the translation
       createAuditEvent('edit', {
         action: 'save_translation',
         shapeId: activeBufferId,
-        slideNumber: currentSlide.slide_number
+        slideId: slideId,
+        text: translatedText
       })
+      
+      // Close the edit dialog
+      setActiveBuffer(null)
     } catch (error) {
-      console.error("Failed to save translation:", error)
-      // ... error handling ...
+      console.error('Error saving translation:', error)
+      // Error handling will be done by the updateShape method and shown in the sync status indicator
     }
   }
 
@@ -341,9 +345,19 @@ export default function SlideEditorPage() {
   }
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden">
-      {/* Header */}
-      <DashboardHeader user={user} />
+    <div className="flex h-full flex-col">
+      <DashboardHeader title={currentSession?.name || "Loading..."} showBackButton>
+        <div className="flex items-center gap-4">
+          <SyncStatusIndicator />
+          <Button 
+            onClick={handleExport} 
+            disabled={!currentSession || slidesLoading}
+            variant="outline"
+          >
+            Export
+          </Button>
+        </div>
+      </DashboardHeader>
 
       {/* Main content area */}
       <div className="flex flex-1 overflow-hidden">

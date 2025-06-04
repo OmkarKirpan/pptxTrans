@@ -208,32 +208,45 @@ flowchart TD
    - Slices combined into a single store
    - Custom hooks for accessing slices
 
-2. **Repository Pattern (Audit Service):**
+2. **Persistence Pattern (State Storage):**
+   - Using Zustand persist middleware
+   - Selective state persistence via partialize
+   - LocalStorage for cross-session survival
+   - Storage adapter pattern for different environments
+
+3. **Real-time Synchronization Pattern:**
+   - Supabase real-time channels for database changes
+   - Event-based subscription model
+   - Channel management with lifecycle hooks
+   - Handlers for different event types (INSERT, UPDATE, DELETE)
+
+4. **Optimistic Updates Pattern:**
+   - Immediate UI updates before server confirmation
+   - Tracking pending/sync status with UI indicators
+   - Error handling with fallback to previous state
+   - Background server synchronization
+
+5. **Repository Pattern (Audit Service):**
    - Abstracts data access logic
    - Enables swapping implementations
    - Centralizes query logic
 
-3. **Middleware Pattern (API Services):**
+6. **Middleware Pattern (API Services):**
    - Chainable request processing
    - Cross-cutting concerns (auth, logging, error handling)
    - Consistent request flow
 
-4. **Background Processing Pattern (PPTX Service):**
+7. **Background Processing Pattern (PPTX Service):**
    - Async task handling
    - Job status tracking
    - Retry mechanisms
 
-5. **Hybrid Rendering Pattern (Frontend):**
+8. **Hybrid Rendering Pattern (Frontend):**
    - SVG backgrounds from processed slides
    - HTML overlays for interactive elements
    - Position matching based on coordinates
 
-6. **Optimistic Updates Pattern (Editing):**
-   - Immediate UI updates
-   - Background synchronization
-   - Conflict resolution
-
-7. **Event Sourcing (Audit Logging):**
+9. **Event Sourcing (Audit Logging):**
    - Capturing all state-changing events
    - Reconstructing state from event log
    - Immutable event history
@@ -248,8 +261,10 @@ flowchart TD
 
 2. **Real-time Updates:**
    - Supabase real-time subscriptions
-   - WebSocket connections for live data
-   - Optimistic UI updates with confirmation
+   - Channel-based data segmentation
+   - Optimistic local updates
+   - Eventual consistency model
+   - Error recovery mechanisms
 
 3. **Error Handling:**
    - Consistent error response format

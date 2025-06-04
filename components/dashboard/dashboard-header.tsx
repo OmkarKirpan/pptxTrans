@@ -14,15 +14,19 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { createClient } from "@/lib/supabase/client"
 import { ThemeToggle } from "@/components/theme-toggle"
-import { LogOut, PlusCircle, Settings, UserCircle, LayoutDashboard, Bell } from "lucide-react"
+import { LogOut, PlusCircle, Settings, UserCircle, LayoutDashboard, Bell, ChevronLeft } from "lucide-react"
 import type { User } from "@supabase/supabase-js"
 import { useNotifications } from "@/lib/store"
+import { ReactNode } from "react"
 
 interface DashboardHeaderProps {
-  user: User | null
+  user?: User | null
+  title?: string
+  showBackButton?: boolean
+  children?: ReactNode
 }
 
-export default function DashboardHeader({ user }: DashboardHeaderProps) {
+export default function DashboardHeader({ user, title, showBackButton, children }: DashboardHeaderProps) {
   const router = useRouter()
   const supabase = createClient()
   const { unreadCount } = useNotifications()
@@ -44,11 +48,26 @@ export default function DashboardHeader({ user }: DashboardHeaderProps) {
 
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b bg-background/95 px-4 shadow-sm backdrop-blur-md sm:px-6 lg:px-8">
-      <Link href="/dashboard" className="flex items-center gap-2 text-xl font-semibold text-primary">
-        <LayoutDashboard className="h-6 w-6" />
-        <span>Translator Dashboard</span>
-      </Link>
+      <div className="flex items-center gap-2">
+        {showBackButton && (
+          <Button variant="ghost" size="icon" onClick={() => router.back()}>
+            <ChevronLeft className="h-5 w-5" />
+          </Button>
+        )}
+        {title ? (
+          <h1 className="text-xl font-semibold">{title}</h1>
+        ) : (
+          <Link href="/dashboard" className="flex items-center gap-2 text-xl font-semibold text-primary">
+            <LayoutDashboard className="h-6 w-6" />
+            <span>Translator Dashboard</span>
+          </Link>
+        )}
+      </div>
+      
       <div className="flex items-center gap-4">
+        {/* Children for custom actions */}
+        {children}
+        
         <ThemeToggle />
         
         {/* Notifications Button */}
@@ -61,12 +80,15 @@ export default function DashboardHeader({ user }: DashboardHeaderProps) {
           )}
         </Button>
         
-        <Button asChild>
-          <Link href="/dashboard/new-session">
-            <PlusCircle className="mr-2 h-5 w-5" />
-            New Session
-          </Link>
-        </Button>
+        {!title && (
+          <Button asChild>
+            <Link href="/dashboard/new-session">
+              <PlusCircle className="mr-2 h-5 w-5" />
+              New Session
+            </Link>
+          </Button>
+        )}
+        
         {user && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

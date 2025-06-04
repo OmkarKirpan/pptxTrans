@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { devtools } from 'zustand/middleware'
+import { devtools, persist } from 'zustand/middleware'
 
 import type { AppStore } from './types'
 import { createSessionSlice } from './slices/session-slice'
@@ -12,28 +12,55 @@ import { createMergeSlice } from './slices/merge-slice'
 /**
  * Create the main application store by combining all slices
  * Wrapped with devtools middleware for better debugging
+ * Added persist middleware for local storage persistence
  */
 export const useAppStore = create<AppStore>()(
   devtools(
-    (...a) => ({
-      // Session slice
-      ...createSessionSlice(...a),
-      
-      // Slides slice
-      ...createSlidesSlice(...a),
-      
-      // Edit buffers slice
-      ...createEditBuffersSlice(...a),
-      
-      // Comments slice
-      ...createCommentsSlice(...a),
-      
-      // Notifications slice
-      ...createNotificationsSlice(...a),
-      
-      // Merge slice
-      ...createMergeSlice(...a),
-    }),
+    persist(
+      (...a) => ({
+        // Session slice
+        ...createSessionSlice(...a),
+        
+        // Slides slice
+        ...createSlidesSlice(...a),
+        
+        // Edit buffers slice
+        ...createEditBuffersSlice(...a),
+        
+        // Comments slice
+        ...createCommentsSlice(...a),
+        
+        // Notifications slice
+        ...createNotificationsSlice(...a),
+        
+        // Merge slice
+        ...createMergeSlice(...a),
+      }),
+      {
+        name: 'pptx-translator-storage',
+        partialize: (state) => ({
+          // Only persist necessary parts of the state
+          currentSession: state.currentSession,
+          userRole: state.userRole,
+          shareToken: state.shareToken,
+          slides: state.slides,
+          currentSlideId: state.currentSlideId,
+          buffers: state.buffers,
+          // Do not persist notifications and comments - these will be fetched from the server
+        }),
+        // Use localStorage for persistence (survives browser restarts)
+        storage: typeof window !== 'undefined' ? {
+          getItem: (name) => {
+            const str = localStorage.getItem(name);
+            return str ? JSON.parse(str) : null;
+          },
+          setItem: (name, value) => {
+            localStorage.setItem(name, JSON.stringify(value));
+          },
+          removeItem: (name) => localStorage.removeItem(name),
+        } : undefined,
+      }
+    ),
     {
       name: 'PowerPoint-Translator-Store',
       enabled: process.env.NODE_ENV !== 'production'
@@ -81,15 +108,19 @@ export const useSlides = () => {
     currentSlideId,
     slidesLoading,
     slidesError,
+    syncStatus,
     reorderState,
     setSlides,
     setCurrentSlide,
     updateSlideShapes,
+    updateShape,
     addSlide,
     removeSlide,
     reorderSlides,
     setSlidesLoading,
     setSlidesError,
+    setSyncStatus,
+    syncSlidesOrder,
     startReorder,
     updateReorderTarget,
     completeReorder,
@@ -101,15 +132,19 @@ export const useSlides = () => {
     currentSlideId,
     slidesLoading,
     slidesError,
+    syncStatus,
     reorderState,
     setSlides,
     setCurrentSlide,
     updateSlideShapes,
+    updateShape,
     addSlide,
     removeSlide,
     reorderSlides,
     setSlidesLoading,
     setSlidesError,
+    setSyncStatus,
+    syncSlidesOrder,
     startReorder,
     updateReorderTarget,
     completeReorder,

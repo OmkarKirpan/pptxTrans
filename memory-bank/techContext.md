@@ -8,7 +8,10 @@
 - **Language:** TypeScript
 - **Styling:** Tailwind CSS
 - **UI Components:** shadcn/ui (Radix UI-based components)
-- **State Management:** Zustand (fully implemented with modular slices)
+- **State Management:** 
+  - Zustand (fully implemented with modular slices)
+  - Zustand/persist middleware for localStorage persistence
+  - Custom real-time synchronization service for Supabase
 - **Form Management:** React Hook Form with Zod validation
 - **Data Fetching:** SWR for client-side fetching, Server Components for server-side
 - **Authentication:** Supabase Auth (JWT-based)
@@ -18,6 +21,7 @@
 - **Icons:** Lucide React icons
 - **Animations:** Framer Motion for transitions
 - **Internationalization:** next-intl (planned for future)
+- **Real-time Updates:** Supabase Realtime with optimistic UI updates
 
 ### 1.2 Backend Services
 
@@ -92,17 +96,22 @@ app/                   # Next.js App Router structure
 components/            # React components
   dashboard/           # Dashboard-specific components
   editor/              # Editor-specific components
+    sync-status-indicator.tsx  # Real-time sync status component
+    slide-canvas.tsx           # Slide rendering component
+    comments-panel.tsx         # Comments panel component
+    slide-navigator.tsx        # Slide navigation component
   ui/                  # shadcn/ui components
 hooks/                 # Custom React hooks
 lib/                   # Utility functions and services
   api/                 # API client functions
   services/            # Service integrations
+    realtime-sync.ts   # Supabase real-time sync service
   store/               # Zustand store
-    index.ts           # Main store creation
+    index.ts           # Main store creation with persistence
     types.ts           # Type definitions
     slices/            # Store slices
       session-slice.ts
-      slides-slice.ts
+      slides-slice.ts       # Enhanced with optimistic updates
       edit-buffers-slice.ts
       comments-slice.ts
       notifications-slice.ts
@@ -246,19 +255,29 @@ interface SessionState {
   setShareToken: (token: string | null) => void;
 }
 
-// Slides slice
+// Slides slice with sync capabilities
 interface SlidesState {
   slides: ProcessedSlide[];
   currentSlideIndex: number;
   isLoading: boolean;
+  syncStatus: SyncStatus; // Added for real-time sync
   reorderState: SlideReorderState | null;
   setSlides: (slides: ProcessedSlide[]) => void;
   setCurrentSlideIndex: (index: number) => void;
   updateSlide: (slideId: string, data: Partial<ProcessedSlide>) => void;
-  updateShape: (slideId: string, shapeId: string, data: Partial<SlideShape>) => void;
+  updateShape: (slideId: string, shapeId: string, data: Partial<SlideShape>) => Promise<void>; // Async for server sync
+  setSyncStatus: (status: Partial<SyncStatus>) => void; // Manage sync state
+  syncSlidesOrder: (slides: ProcessedSlide[]) => Promise<void>; // Sync slide order with server
   startReorder: (sourceIndex: number) => void;
   moveSlide: (targetIndex: number) => void;
   finishReorder: () => void;
+}
+
+// Sync status interface
+interface SyncStatus {
+  isSyncing: boolean;
+  lastSynced: string | null;
+  error: string | null;
 }
 
 // Edit buffers slice
@@ -363,9 +382,15 @@ interface MergeState {
 
 - **Lazy Loading:** Components and resources loaded on demand
 - **Image Optimization:** Next.js Image component for optimized delivery
-- **State Management:** Selective re-rendering with Zustand selectors
+- **State Management:** 
+  - Selective re-rendering with Zustand selectors
+  - Optimistic updates for faster perceived performance
+  - Persistent state to reduce initialization time
+  - Partialize function to limit storage size
 - **Code Splitting:** Next.js automatic code splitting
 - **Server Components:** Reduced client-side JavaScript
+- **Real-time Sync:** Efficient subscription management with cleanup
+- **LocalStorage Optimization:** Storing only necessary state
 
 ### 8.2 Backend Performance
 

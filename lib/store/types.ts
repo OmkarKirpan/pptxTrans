@@ -44,6 +44,13 @@ export interface SlideReorderState {
   targetPosition: number | null
 }
 
+// Sync status interface
+export interface SyncStatus {
+  isSyncing: boolean
+  lastSynced: string | null
+  error: string | null
+}
+
 // Shape selection for merge operations
 export interface MergeSelection {
   slideId: string
@@ -73,6 +80,9 @@ export interface SlidesState {
   slidesLoading: boolean
   slidesError: string | null
   
+  // Sync status
+  syncStatus: SyncStatus
+  
   // Reorder state
   reorderState: SlideReorderState
   
@@ -91,6 +101,11 @@ export interface SlidesState {
   updateReorderTarget: (position: number) => void
   completeReorder: () => void
   cancelReorder: () => void
+  
+  // Sync actions
+  setSyncStatus: (status: Partial<SyncStatus>) => void
+  updateShape: (slideId: string, shapeId: string, updatedData: Partial<SlideShape>) => Promise<void>
+  syncSlidesOrder: (slides: ProcessedSlide[]) => Promise<void>
 }
 
 // Edit buffers state slice
