@@ -20,7 +20,11 @@
     - **Type-First Approach:** Comprehensive TypeScript interfaces defined before implementation.
     - **Co-located Actions:** Actions defined alongside state in each slice for clarity.
     - **Store Structure:** lib/store/ directory with types.ts and slices/ subdirectory.
-    - **Custom Hooks:** Planning to implement useAppStore, useSession, useSlides, etc. for clean component integration.
+    - **Custom Hooks:** Implemented useAppStore, useSession, useSlides, etc. for clean component integration.
+    - **Persistence Strategy:** Using localStorage with Zustand persist middleware for cross-session survival.
+    - **Real-time Synchronization:** Supabase real-time channels with optimistic updates pattern.
+    - **Error Handling:** Fallback UI and error states for graceful degradation.
+    - **Component Integration:** All major components now use the store directly instead of local state.
 - **User Experience (UX) Priorities:**
     - **Intuitive Workflow:** The user journey from upload to translation to export should be clear and straightforward.
     - **Visual Fidelity:** The editor should represent the original slide as accurately as possible.
@@ -43,6 +47,8 @@
 - **Evolution of Decisions:**
     - Initial thought might have been simpler client-side rendering, but shifted to server-side SVG conversion for higher visual fidelity as per user request. This significantly impacts the `SlideCanvas` design and data requirements.
     - Started with React's built-in state management, but evolved to Zustand for better scalability and centralized state management as the app complexity grew.
+    - Enhanced Zustand implementation with persistence, real-time synchronization, and optimistic updates to provide a more responsive user experience.
+    - Added drag-and-drop functionality for slide reordering using @hello-pangea/dnd integrated with Zustand for state persistence.
 - **Tool Usage Patterns:**
     - Supabase dashboard for managing users, database schema, and storage.
     - v0 AI for code generation and iteration.

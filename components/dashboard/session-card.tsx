@@ -9,27 +9,40 @@ import { Progress } from "@/components/ui/progress"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import type { TranslationSession } from "@/types"
 import { formatDistanceToNow } from "date-fns"
-import { Share2, Download, Trash2, FileText, Clock, Languages } from "lucide-react"
+import { Share2, Download, Trash2, FileText, Clock, Languages, Loader2 } from "lucide-react"
 import Image from "next/image"
+import { useState } from "react"
+import { useSession } from "@/lib/store"
+import { createClient } from "@/lib/supabase/client"
+import { useAuditLog } from "@/hooks/useAuditLog"
 
 interface SessionCardProps {
   session: TranslationSession
-  onShare: (sessionId: string) => void
-  onExport: (sessionId: string) => void
-  onDelete: (sessionId: string) => void
+  onShare?: (sessionId: string) => void
+  onExport?: (sessionId: string) => void
+  onDelete?: (sessionId: string) => void
 }
 
 export default function SessionCard({ session, onShare, onExport, onDelete }: SessionCardProps) {
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
+  const [isSharing, setIsSharing] = useState(false)
+  const supabase = createClient()
+  const { createAuditEvent } = useAuditLog(session.id)
+  
+  // Use the session store
+  const { setSession, clearSession } = useSession()
+
   const getStatusVariant = (
     status: TranslationSession["status"],
-  ): "default" | "secondary" | "outline" | "destructive" | "success" | "warning" => {
+  ): "default" | "secondary" | "outline" | "destructive" => {
     switch (status) {
       case "draft":
         return "secondary"
       case "in-progress":
         return "default" // Using primary color via default Badge style
       case "ready":
-        return "success"
+        return "destructive" // Changed from "success" to match available variants
       default:
         return "outline"
     }
@@ -39,6 +52,92 @@ export default function SessionCard({ session, onShare, onExport, onDelete }: Se
     draft: "Draft",
     "in-progress": "In Progress",
     ready: "Ready for Export",
+  }
+  
+  const handleShare = async () => {
+    setIsSharing(true)
+    
+    try {
+      // Call the parent component's onShare handler if provided
+      if (onShare) {
+        onShare(session.id)
+      } else {
+        // Handle sharing logic directly
+        createAuditEvent('share', {
+          action: 'share_session',
+          sessionName: session.name
+        })
+        
+        // Implement share functionality - for now just a placeholder
+        console.log("Sharing session:", session.id)
+      }
+    } catch (error) {
+      console.error("Error sharing session:", error)
+    } finally {
+      setIsSharing(false)
+    }
+  }
+  
+  const handleExport = async () => {
+    if (session.status !== "ready") return
+    
+    setIsExporting(true)
+    
+    try {
+      // Call the parent component's onExport handler if provided
+      if (onExport) {
+        onExport(session.id)
+      } else {
+        // Handle export logic directly
+        createAuditEvent('export', {
+          action: 'export_session',
+          sessionName: session.name,
+          slideCount: session.slide_count
+        })
+        
+        // Implement export functionality - for now just a placeholder
+        console.log("Exporting session:", session.id)
+      }
+    } catch (error) {
+      console.error("Error exporting session:", error)
+    } finally {
+      setIsExporting(false)
+    }
+  }
+  
+  const handleDelete = async () => {
+    setIsDeleting(true)
+    
+    try {
+      // Optimistically update UI by removing the session from the store
+      clearSession()
+      
+      // Call the parent component's onDelete handler if provided
+      if (onDelete) {
+        onDelete(session.id)
+      } else {
+        // Handle delete logic directly
+        createAuditEvent('create', {
+          action: 'delete_session',
+          sessionName: session.name
+        })
+        
+        // Delete the session from Supabase
+        const { error } = await supabase
+          .from('translation_sessions')
+          .delete()
+          .eq('id', session.id)
+        
+        if (error) throw error
+      }
+    } catch (error) {
+      console.error("Error deleting session:", error)
+      
+      // If there was an error, restore the session in the store
+      setSession(session, 'owner')
+    } finally {
+      setIsDeleting(false)
+    }
   }
 
   return (
@@ -94,8 +193,18 @@ export default function SessionCard({ session, onShare, onExport, onDelete }: Se
           <div className="flex w-full justify-end space-x-2">
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" onClick={() => onShare(session.id)} aria-label="Share session">
-                  <Share2 className="h-4 w-4" />
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  onClick={handleShare} 
+                  aria-label="Share session"
+                  disabled={isSharing}
+                >
+                  {isSharing ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Share2 className="h-4 w-4" />
+                  )}
                 </Button>
               </TooltipTrigger>
               <TooltipContent>Share</TooltipContent>
@@ -105,11 +214,15 @@ export default function SessionCard({ session, onShare, onExport, onDelete }: Se
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => onExport(session.id)}
+                  onClick={handleExport}
                   aria-label="Export session"
-                  disabled={session.status !== "ready"}
+                  disabled={session.status !== "ready" || isExporting}
                 >
-                  <Download className="h-4 w-4" />
+                  {isExporting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Download className="h-4 w-4" />
+                  )}
                 </Button>
               </TooltipTrigger>
               <TooltipContent>Export</TooltipContent>
@@ -119,11 +232,16 @@ export default function SessionCard({ session, onShare, onExport, onDelete }: Se
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => onDelete(session.id)}
+                  onClick={handleDelete}
                   className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                   aria-label="Delete session"
+                  disabled={isDeleting}
                 >
-                  <Trash2 className="h-4 w-4" />
+                  {isDeleting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-4 w-4" />
+                  )}
                 </Button>
               </TooltipTrigger>
               <TooltipContent>Delete</TooltipContent>

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback, type ChangeEvent, type DragEvent } from "react"
+import { useState, useCallback, type ChangeEvent, type DragEvent, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
@@ -8,10 +8,12 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import type { UploadedFile } from "@/types"
+import type { UploadedFile, TranslationSession } from "@/types"
 import { UploadCloud, FileText, CheckCircle, XCircle, ArrowRight, Loader2 } from "lucide-react"
 import Image from "next/image"
 import { useAuditLog } from "@/hooks/useAuditLog"
+import { useSession } from "@/lib/store"
+import { createClient } from "@/lib/supabase/client"
 
 interface UploadWizardProps {
   onComplete: (sessionId: string, sessionName: string) => void
@@ -29,6 +31,7 @@ type WizardStep = (typeof STEPS)[keyof typeof STEPS]
 
 export default function UploadWizard({ onComplete, supportedLanguages, userId }: UploadWizardProps) {
   const router = useRouter()
+  const supabase = createClient()
   const [currentStep, setCurrentStep] = useState<WizardStep>(STEPS.UPLOAD)
   const [uploadedFile, setUploadedFile] = useState<UploadedFile | null>(null)
   const [isUploading, setIsUploading] = useState(false)
@@ -42,9 +45,14 @@ export default function UploadWizard({ onComplete, supportedLanguages, userId }:
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [configError, setConfigError] = useState<string | null>(null)
 
-  const [mockSessionId, setMockSessionId] = useState<string | null>(null)
+  const [sessionId, setSessionId] = useState<string | null>(null)
   
-  const { createAuditEvent } = useAuditLog('temp-session-id')
+  // Use the session slice from the store
+  const { setSession, setLoading, setError, isLoading, error } = useSession()
+  
+  // Create a temporary session ID for audit logging
+  const tempSessionId = sessionId || 'temp-session-id'
+  const { createAuditEvent } = useAuditLog(tempSessionId)
 
   const handleFileChange = (files: FileList | null) => {
     if (files && files[0]) {
@@ -144,13 +152,54 @@ export default function UploadWizard({ onComplete, supportedLanguages, userId }:
     await new Promise((resolve) => setTimeout(resolve, 2000))
     setIsParsing(false)
     setIsCreatingSession(true)
+    setLoading(true)
 
-    // Mock session creation (replace with actual Supabase call)
+    // Prepare session data
+    const sessionData = {
+      name: sessionName,
+      user_id: userId,
+      source_language: sourceLanguage,
+      target_language: targetLanguage,
+      status: "draft" as const,
+      progress: 0,
+      slide_count: 0,
+      thumbnail_url: null,
+      original_file_path: null
+    }
+
     try {
-      // const { data, error } = await supabase.from('translation_sessions').insert({ ... }).select();
-      await new Promise((resolve) => setTimeout(resolve, 1500)) // Simulate API
-      const newSessionId = `sess_${Date.now()}` // Mock ID
-      setMockSessionId(newSessionId)
+      // Create session in Supabase
+      const { data, error } = await supabase
+        .from('translation_sessions')
+        .insert(sessionData)
+        .select()
+        .single();
+      
+      if (error) throw error;
+      
+      // Set the new session ID
+      const newSessionId = data.id;
+      setSessionId(newSessionId);
+      
+      // Create a session object to store in Zustand
+      const newSession: TranslationSession = {
+        id: newSessionId,
+        name: sessionName,
+        user_id: userId,
+        source_language: sourceLanguage,
+        target_language: targetLanguage,
+        status: "draft",
+        progress: 0,
+        slide_count: 0,
+        thumbnail_url: null,
+        original_file_path: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }
+      
+      // Update the store with the new session
+      setSession(newSession, 'owner')
+      setLoading(false)
       
       createAuditEvent('create', {
         action: 'session_created',
@@ -162,10 +211,13 @@ export default function UploadWizard({ onComplete, supportedLanguages, userId }:
 
       setIsCreatingSession(false)
       setCurrentStep(STEPS.SUCCESS)
-    } catch (error) {
+    } catch (err) {
+      const error = err as Error
       console.error("Error creating session:", error)
       setConfigError("Failed to create session. Please try again.")
       setIsCreatingSession(false)
+      setLoading(false)
+      setError(error.message)
       
       createAuditEvent('create', {
         action: 'session_creation_failed',
@@ -178,30 +230,30 @@ export default function UploadWizard({ onComplete, supportedLanguages, userId }:
   }
 
   const handleViewSlides = () => {
-    if (mockSessionId) {
+    if (sessionId) {
       createAuditEvent('create', {
         action: 'navigation',
         from: 'success',
         to: 'editor',
-        sessionId: mockSessionId,
+        sessionId: sessionId,
         sessionName
       })
       
-      onComplete(mockSessionId, sessionName)
-      router.push(`/editor/${mockSessionId}`)
+      onComplete(sessionId, sessionName)
+      router.push(`/editor/${sessionId}`)
     }
   }
 
   const handleShareNow = () => {
-    if (mockSessionId) {
+    if (sessionId) {
       createAuditEvent('share', {
         action: 'share_initiated',
-        sessionId: mockSessionId,
+        sessionId: sessionId,
         sessionName
       })
       
-      // Implement share logic or redirect to a share page
-      alert(`Sharing session: ${sessionName} (ID: ${mockSessionId}) - (Sharing not implemented)`)
+      // TODO: Implement sharing logic
+      router.push(`/dashboard/share/${sessionId}`) // This route would need to be created
     }
   }
 

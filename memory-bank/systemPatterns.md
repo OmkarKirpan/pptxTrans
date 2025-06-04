@@ -219,37 +219,47 @@ flowchart TD
    - Event-based subscription model
    - Channel management with lifecycle hooks
    - Handlers for different event types (INSERT, UPDATE, DELETE)
+   - Component-level cleanup to prevent memory leaks
 
 4. **Optimistic Updates Pattern:**
    - Immediate UI updates before server confirmation
    - Tracking pending/sync status with UI indicators
    - Error handling with fallback to previous state
    - Background server synchronization
+   - Loading states with fallback UI
 
-5. **Repository Pattern (Audit Service):**
+5. **Drag-and-Drop Pattern:**
+   - Using @hello-pangea/dnd for smooth drag interactions
+   - Droppable context for drop targets
+   - Draggable components for interactive elements
+   - Store integration for persistence of reordered items
+   - Optimistic UI updates during drag operations
+   - Server synchronization after reordering
+
+6. **Repository Pattern (Audit Service):**
    - Abstracts data access logic
    - Enables swapping implementations
    - Centralizes query logic
 
-6. **Middleware Pattern (API Services):**
+7. **Middleware Pattern (API Services):**
    - Chainable request processing
    - Cross-cutting concerns (auth, logging, error handling)
    - Consistent request flow
 
-7. **Background Processing Pattern (PPTX Service):**
+8. **Background Processing Pattern (PPTX Service):**
    - Async task handling
    - Job status tracking
    - Retry mechanisms
 
-8. **Hybrid Rendering Pattern (Frontend):**
+9. **Hybrid Rendering Pattern (Frontend):**
    - SVG backgrounds from processed slides
    - HTML overlays for interactive elements
    - Position matching based on coordinates
 
-9. **Event Sourcing (Audit Logging):**
-   - Capturing all state-changing events
-   - Reconstructing state from event log
-   - Immutable event history
+10. **Event Sourcing (Audit Logging):**
+    - Capturing all state-changing events
+    - Reconstructing state from event log
+    - Immutable event history
 
 ## 4. Communication Patterns
 

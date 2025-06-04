@@ -362,12 +362,13 @@ export default function SlideEditorPage() {
       {/* Main content area */}
       <div className="flex flex-1 overflow-hidden">
         {/* Left sidebar - Slide Navigator */}
-        <div className="w-64 flex-none overflow-y-auto border-r bg-muted/30 p-4">
-          <SlideNavigator
-            slides={slides}
-            currentSlideId={currentSlideId}
-            onSelectSlide={handleSelectSlide}
-          />
+        <div className="flex h-full flex-col border-r">
+          <div className="border-b p-2">
+            <h2 className="text-sm font-medium text-center">Slides</h2>
+          </div>
+          <div className="flex-1">
+            <SlideNavigator />
+          </div>
         </div>
 
         {/* Center - Slide Canvas */}
