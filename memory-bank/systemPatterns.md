@@ -79,6 +79,14 @@ The Audit Service provides a dedicated microservice for tracking and retrieving 
    - In-memory storage for test events
    - Bypasses authentication requirements
 
+8. **Audit Integration Pattern:** (NEW)
+   - **Component-Level Integration:** Components use the `useAuditLog` hook to access audit functionality
+   - **Enhanced Data Capture:** UI components like `SlideCanvas` pass detailed data to event handlers for comprehensive audit logs
+   - **Offline-First Approach:** Events are queued locally before sending to ensure no data loss during connectivity issues
+   - **Graceful Degradation:** Audit failures don't block user actions but are retried in the background
+   - **Centralized Event Creation:** All audit events flow through the `createAuditEvent` function from the hook
+   - **Event Types Standardization:** Using consistent event types across all components (`view`, `edit`, `export`, etc.)
+
 ## 6. PPTX Processor Service Architecture
 The processor service follows a clean architecture pattern:
 
@@ -152,6 +160,11 @@ The Audit Service follows a clean, layered architecture pattern in Go:
    - For each text `SlideShape`, positions a transparent HTML overlay on top of the SVG using the extracted coordinates
    - Makes these overlays interactive, allowing users to click and trigger a text editing dialog
 3. **Text Editing:** User edits translations in a dialog. Saved translations update the `translated_text` field in the `slide_shapes` table in Supabase
+4. **Audit Logging:** (NEW) User interactions trigger audit events:
+   - Loading the editor logs a 'view' event
+   - Selecting a slide logs a navigation event
+   - Opening the text editor logs a text selection event
+   - Saving translated text logs an 'edit' event with before/after values
 
 ## 9. UI Structure & State Management
 - **Component-Based Architecture:** Utilizing shadcn/ui components and custom React components for modularity and reusability
@@ -180,3 +193,7 @@ The Audit Service follows a clean, layered architecture pattern in Go:
   - `AuditQueueService` implements offline queue and retry mechanism
   - Graceful degradation with informative error messages
   - Recovery strategies for network interruptions
+- **Feature Prioritization:** (NEW)
+  - Focus on core translation functionality first
+  - Implement critical audit logging for key user actions
+  - Comments system deferred to future phases

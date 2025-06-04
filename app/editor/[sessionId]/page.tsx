@@ -180,6 +180,12 @@ export default function SlideEditorPage() {
         
         // Log view event
         createAuditEvent('view', { initialSlide: MOCK_PROCESSED_SLIDES[0]?.slide_number || 1 })
+
+        // Log view event when editor is first loaded
+        createAuditEvent('view', {
+          sessionId,
+          action: 'editor_opened'
+        })
       }
       setLoading(false)
     }
@@ -198,7 +204,12 @@ export default function SlideEditorPage() {
     }
   }
 
-  const handleTextClick = (shapeId: string, originalText: string, currentTranslation?: string) => {
+  const handleTextClick = (
+    shapeId: string, 
+    originalText: string, 
+    currentTranslation?: string,
+    shapeData?: any
+  ) => {
     setTextEditor({
       isOpen: true,
       shapeId,
@@ -206,47 +217,65 @@ export default function SlideEditorPage() {
       currentTranslation: currentTranslation || "",
     })
     
-    // Log text selection for editing
-    createAuditEvent('edit', { 
-      action: 'select_text',
-      shapeId, 
-      slideNumber: currentSlide?.slide_number
+    // Log text selection event with enhanced data
+    createAuditEvent('view', {
+      slideId: currentSlide?.id,
+      slideNumber: currentSlide?.slide_number,
+      shapeId,
+      action: 'opened_text_editor',
+      shapeDetails: shapeData
     })
   }
 
   const handleSaveTranslation = async () => {
     if (!currentSlide || !textEditor.shapeId) return
 
-    // Optimistic update
-    const newSlides = slides.map((s) => {
-      if (s.id === currentSlide.id) {
-        return {
-          ...s,
-          shapes: s.shapes.map((sh) => {
-            if (sh.id === textEditor.shapeId) {
-              return { ...sh, translated_text: textEditor.currentTranslation }
-            }
-            return sh
-          }),
+    try {
+      // Optimistic update
+      const newSlides = slides.map((s) => {
+        if (s.id === currentSlide.id) {
+          return {
+            ...s,
+            shapes: s.shapes.map((sh) => {
+              if (sh.id === textEditor.shapeId) {
+                return { ...sh, translated_text: textEditor.currentTranslation }
+              }
+              return sh
+            }),
+          }
         }
-      }
-      return s
-    })
+        return s
+      })
 
-    setSlides(newSlides)
-    setCurrentSlide(newSlides.find((s) => s.id === currentSlide.id) || null)
-    setTextEditor({ ...textEditor, isOpen: false })
+      setSlides(newSlides)
+      setCurrentSlide(newSlides.find((s) => s.id === currentSlide.id) || null)
+      setTextEditor({ ...textEditor, isOpen: false })
 
-    // In a real app: Save to Supabase here
-    // const { data, error } = await supabase.from('slide_shapes').update({ translated_text: textEditor.currentTranslation }).eq('id', textEditor.shapeId)
-    // If error, revert the optimistic update
-    
-    // Log translation save
-    createAuditEvent('edit', {
-      action: 'save_translation',
-      shapeId: textEditor.shapeId,
-      slideNumber: currentSlide.slide_number
-    })
+      // Log translation save
+      createAuditEvent('edit', {
+        action: 'save_translation',
+        shapeId: textEditor.shapeId,
+        slideNumber: currentSlide.slide_number
+      })
+    } catch (error) {
+      console.error("Failed to save translation:", error)
+      // ... error handling ...
+    }
+  }
+
+  const handleExport = async () => {
+    try {
+      // ... existing export logic ...
+      
+      // Log export event
+      createAuditEvent('export', {
+        format: 'pptx',
+        slideCount: slides.length
+      })
+    } catch (error) {
+      console.error("Export failed:", error)
+      // ... error handling ...
+    }
   }
 
   if (loading) {

@@ -52,6 +52,11 @@
     - `AuditServiceClient` for communicating with the Audit Service
     - `useAuditLog` hook for React components to log events and fetch history
     - Graceful degradation when the audit service is unavailable
+    - **Editor Integration (NEW):** 
+      - Added audit logging for slide navigation, text selection/editing, and export actions
+      - Enhanced `SlideCanvas` to pass detailed shape data for more comprehensive audit logs
+      - Implemented view event logging on initial editor load
+      - Error handling for failed audit events with fallback to queue for later retry
 
 - **Database Setup (Supabase PostgreSQL):**
     - `translation_sessions` table: Created, seeded with sample data. RLS policies in place.
@@ -78,9 +83,11 @@
         - Overlays interactive, transparent HTML elements for text shapes based on coordinates from `ProcessedSlide.shapes`.
         - Handles click events on text overlays to open an editing dialog.
         - Uses mock `ProcessedSlide` data for now.
+        - **Enhanced for Audit Logging (NEW):** Now passes detailed shape data to click handlers for better audit logging.
     - **Text Editing Dialog:**
         - Pops up with original text and an input for translation.
         - "Save" button updates local state (optimistic update) and attempts to save the `translated_text` to the `slide_shapes` table in Supabase.
+        - **Added Audit Logging (NEW):** Now records edit events with before/after text and shape details.
     - `SlideNavigator`: Displays mock slide thumbnails. Selection updates `currentSlide` in the editor. (Needs update for `ProcessedSlide` data).
     - `CommentsPanel`: Placeholder UI.
 
@@ -128,10 +135,10 @@
     - Update UI to show accurate processing status and progress
 
 - **Complete Audit Service Integration:**
-    - Add audit log display component in the editor UI
-    - Test the integration with the updated API format (using 'type' instead of 'action')
-    - Implement comprehensive event logging for all user actions
-    - Add audit log filtering and search capabilities
+    - **Dashboard Integration:** Add audit logging for dashboard actions (sharing, exporting, deleting sessions)
+    - **Additional Editor Events:** Implement audit logging for additional user actions (e.g., batch operations)
+    - **Testing:** Perform comprehensive testing of the complete audit flow from frontend to backend
+    - **Session Share Audit:** Implement audit logging for session sharing and access by share recipients
 
 - **`UploadWizard` Full Integration:**
     - Replace mock upload flow with actual file upload to the processor service
@@ -143,7 +150,6 @@
     - **Real Data Fetching:** Load actual `ProcessedSlide` and `SlideShape` data from Supabase based on `sessionId`
     - **`SlideNavigator` Update:** Integrate with real `ProcessedSlide` data, using `svg_url` for thumbnails
     - **Enhanced Text Editing:** Add more formatting options and better editing UX
-    - **Comments & Collaboration:** Implement `CommentThread`, `CommentForm`, and backend logic for adding, viewing, and resolving comments on `slide_shapes`
     - **Text Merge Interface:** UI and logic for selecting and merging multiple text runs
     - **Reading Order Interface:** UI for visualizing and reordering text elements
     - **Saving All Changes:** Robust mechanism for saving all slide and shape modifications
@@ -174,6 +180,8 @@ The project has made significant progress with the implementation of both the fr
 
 The frontend components for authentication, dashboard, and the slide editor structure are in place, with the key `SlideCanvas` component refactored to support the high-fidelity SVG rendering approach. Recent fixes to the API format compatibility between the frontend and the Audit Service ensure consistent communication.
 
+The Audit Service integration has progressed well, with the core logging capabilities now implemented in the editor for key user actions. The enhanced `SlideCanvas` component now provides more detailed data for comprehensive audit logging.
+
 The main focus now is on resolving the LibreOffice integration issues and connecting these components - integrating the frontend with both the processor service and audit service to enable end-to-end functionality from upload to editing. Once this integration is complete, the application will provide a solid foundation for translation functionality, with future efforts focused on enhancing the editing experience, collaboration features, and export capabilities.
 
 ## 4. Known Issues & Challenges
@@ -191,3 +199,5 @@ The main focus now is on resolving the LibreOffice integration issues and connec
 - **Data Consistency:** Ensuring data consistency between the client state, the Supabase database, and any cached data, especially with optimistic updates during text editing.
 
 - **LibreOffice Dependency:** The processor service relies on LibreOffice for high-quality SVG conversion. While a fallback approach is implemented, the best results require LibreOffice to be properly installed and configured in the deployment environment.
+
+- **Feature Prioritization (NEW):** Balancing the implementation of core translation functionality with additional features like commenting. The current focus is on delivering a working translation MVP first, with comments and additional collaboration features planned for future phases.

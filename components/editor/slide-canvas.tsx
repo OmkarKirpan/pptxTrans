@@ -10,7 +10,7 @@ import Image from "next/image" // For displaying the SVG via URL
 interface SlideCanvasProps {
   slide: ProcessedSlide | null
   editable: boolean
-  onTextClick: (shapeId: string, originalText: string, currentTranslation?: string) => void
+  onTextClick: (shapeId: string, originalText: string, currentTranslation?: string, shapeData?: any) => void
   showReadingOrder: boolean
   // scale prop might be less relevant if SVG scales within aspect ratio container
 }
@@ -102,7 +102,22 @@ export default function SlideCanvas({ slide, editable, onTextClick, showReadingO
               onClick={() =>
                 editable &&
                 shape.original_text &&
-                onTextClick(shape.id, shape.original_text, shape.translated_text || undefined)
+                onTextClick(
+                  shape.id, 
+                  shape.original_text, 
+                  shape.translated_text || undefined,
+                  {
+                    reading_order: shape.reading_order,
+                    shape_type: shape.type,
+                    position: {
+                      x: shape.x_coordinate,
+                      y: shape.y_coordinate,
+                      width: shape.width,
+                      height: shape.height,
+                      unit: shape.coordinates_unit
+                    }
+                  }
+                )
               }
               title={editable && shape.original_text ? "Click to edit text" : ""}
             >
