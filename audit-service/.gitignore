@@ -39,8 +39,6 @@ Thumbs.db
 # Log files
 *.log
 
-# Generated documentation
-docs/
 
 # Air live reload
 .air.toml
