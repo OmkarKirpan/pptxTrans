@@ -1,4 +1,5 @@
 import { ProcessingResponse, ProcessingStatus } from '@/types/pptx-processor';
+import { ExportResponse, DownloadUrlResponse } from '@/types/api/pptx-processor';
 import { fetchWithAuthAndCors, fetchWithCors } from './api-utils';
 
 const PPTX_PROCESSOR_URL = process.env.NEXT_PUBLIC_PPTX_PROCESSOR_URL || 'http://localhost:8000';
@@ -183,6 +184,85 @@ export class PptxProcessorClient {
     } catch (error) {
       console.error('PPTX processor health check failed:', error);
       return false;
+    }
+  }
+
+  /**
+   * Export translated presentation as PPTX
+   */
+  async exportPptx(sessionId: string): Promise<ProcessingResponse> {
+    try {
+      const formData = new FormData();
+      formData.append('session_id', sessionId);
+      
+      const fetchFunction = this.token ? fetchWithAuthAndCors : fetchWithCors;
+      const fetchOptions: RequestInit = {
+        method: 'POST',
+        body: formData,
+      };
+      
+      const response = this.token 
+        ? await fetchWithAuthAndCors(`${PPTX_PROCESSOR_URL}/v1/export`, this.token, fetchOptions)
+        : await fetchWithCors(`${PPTX_PROCESSOR_URL}/v1/export`, fetchOptions);
+      
+      if (!response.ok) {
+        // Handle specific error status codes
+        if (response.status === 401) {
+          throw new Error('Authentication failed: Invalid or expired token');
+        } else if (response.status === 400) {
+          const error = await response.json();
+          throw new Error(`Invalid request: ${error.detail || 'Bad request'}`);
+        } else if (response.status === 404) {
+          throw new Error('PPTX processor export endpoint not found');
+        } else if (response.status === 503) {
+          throw new Error('PPTX processor service is currently unavailable');
+        } else {
+          const error = await response.json();
+          throw new Error(error.detail || 'Failed to export PPTX file');
+        }
+      }
+      
+      return response.json();
+    } catch (error: any) {
+      console.error('Error exporting PPTX:', error);
+      
+      // Check for network-related errors
+      if (error instanceof TypeError && error.message.includes('fetch')) {
+        console.error('PPTX processor service is unreachable');
+        throw new Error('PPTX processor service is unreachable');
+      }
+      
+      // Re-throw the error to be handled by the calling function
+      throw error;
+    }
+  }
+
+  /**
+   * Get download URL for exported PPTX
+   */
+  async getExportDownloadUrl(sessionId: string): Promise<string> {
+    try {
+      const fetchOptions: RequestInit = {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      };
+      
+      // Use the appropriate fetch function based on whether we have a token
+      const response = this.token 
+        ? await fetchWithAuthAndCors(`${PPTX_PROCESSOR_URL}/v1/export/${sessionId}/download`, this.token, fetchOptions)
+        : await fetchWithCors(`${PPTX_PROCESSOR_URL}/v1/export/${sessionId}/download`, fetchOptions);
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Failed to get export download URL');
+      }
+      
+      const data = await response.json();
+      return data.download_url;
+    } catch (error) {
+      console.error('Error getting export download URL:', error);
+      throw error;
     }
   }
 } 

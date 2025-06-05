@@ -1,29 +1,30 @@
 "use client" // For client-side interactions and state hooks
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useMemo } from "react"
 import { useParams, useRouter } from "next/navigation"
-
-import DashboardHeader from "@/components/dashboard/dashboard-header"
-import SlideNavigator from "@/components/editor/slide-navigator" // Assuming this is updated for ProcessedSlide thumbnails
-import SlideCanvas from "@/components/editor/slide-canvas"
-import CommentsPanel from "@/components/editor/comments-panel"
-import { createClient } from "@/lib/supabase/client"
-import type { ProcessedSlide } from "@/types" // Corrected import
+import { useToast } from "@/components/ui/use-toast"
+import { ToastAction } from "@/components/ui/toast"
 import { Loader2, AlertTriangle, Eye, MessageSquare, MessageSquareOff, Lock } from "lucide-react"
 import type { User } from "@supabase/supabase-js"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { useAuditLog } from "@/hooks/useAuditLog" // Import audit log hook
+import { useAuditLog } from "@/hooks/useAuditLog"
 import { SyncStatusIndicator } from "@/components/editor/sync-status-indicator"
 import { useRealTimeSync } from "@/lib/services/realtime-sync"
-import { updateLastOpenedAt } from "@/lib/api/translationSessionApi" // Import the API function
+import { updateLastOpenedAt } from "@/lib/api/translationSessionApi"
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import DashboardHeader from "@/components/dashboard/dashboard-header"
+import SlideNavigator from "@/components/editor/slide-navigator"
+import SlideCanvas from "@/components/editor/slide-canvas"
+import CommentsPanel from "@/components/editor/comments-panel"
+import { createClient } from "@/lib/supabase/client"
 
 // Import Zustand hooks
 import { useSlides, useEditBuffers, useTranslationSessions, useSession } from "@/lib/store"
+import { PptxProcessorClient } from '@/lib/api/pptx-processor'
 
 // MOCK DATA using ProcessedSlide and new SlideShape structure - REMOVE THIS
 // const MOCK_PROCESSED_SLIDES: ProcessedSlide[] = [ ... ];
@@ -32,6 +33,7 @@ export default function SlideEditorPage() {
   const params = useParams()
   const router = useRouter()
   const { subscribeToSession, unsubscribeFromSession } = useRealTimeSync()
+  const { toast } = useToast()
 
   const sessionId = params.sessionId as string
   
@@ -75,6 +77,7 @@ export default function SlideEditorPage() {
   } = useEditBuffers()
 
   const [user, setUser] = useState<User | null>(null) // Keep for user auth state
+  const [isExporting, setIsExporting] = useState(false)
 
   // Derived current slide
   const currentSlide = slides.find(s => s.id === currentSlideId)
@@ -244,24 +247,97 @@ export default function SlideEditorPage() {
   // Re-implement handleExport
   const handleExport = async () => {
     if (!canEdit) {
-      // Show permission error toast or dialog
-      console.error("You don't have permission to export this session");
+      toast({
+        variant: "destructive",
+        title: "Permission denied",
+        description: "You don't have permission to export this session"
+      });
       return;
     }
 
     if (!currentSessionDetails) return;
+    
     try {
-      // Placeholder for actual export logic
-      console.log("Exporting session:", currentSessionDetails.id);
-      alert("Export functionality to be implemented.");
-
+      setIsExporting(true);
+      
+      // Create audit event for export initiated
       createAuditEvent('export', {
         action: 'pptx_export_initiated',
         sessionId: currentSessionDetails.id,
         slideCount: slides.length,
       });
+      
+      // Start export process
+      toast({
+        title: "Export started",
+        description: "Your presentation is being prepared for export. This may take a few minutes."
+      });
+      
+      // Call export endpoint
+      const pptxProcessorClient = new PptxProcessorClient();
+      const response = await pptxProcessorClient.exportPptx(currentSessionDetails.id);
+      
+      // Set up polling for job status
+      const jobId = response.job_id;
+      const statusCheckInterval = setInterval(async () => {
+        try {
+          const statusResponse = await pptxProcessorClient.getProcessingStatus(jobId);
+          
+          if (statusResponse.status === 'completed') {
+            clearInterval(statusCheckInterval);
+            setIsExporting(false);
+            
+            // Get download URL
+            const downloadUrl = await pptxProcessorClient.getExportDownloadUrl(currentSessionDetails.id);
+            
+            // Create audit event for export completed
+            createAuditEvent('export', {
+              action: 'pptx_export_completed',
+              sessionId: currentSessionDetails.id,
+              slideCount: slides.length,
+            });
+            
+            // Show success notification with download link
+            toast({
+              title: "Export completed",
+              description: "Your presentation is ready for download.",
+              action: (
+                <ToastAction altText="Download" onClick={() => window.open(downloadUrl, '_blank')}>
+                  Download
+                </ToastAction>
+              ),
+            });
+          } else if (statusResponse.status === 'failed') {
+            clearInterval(statusCheckInterval);
+            setIsExporting(false);
+            
+            // Create audit event for export failed
+            createAuditEvent('export', {
+              action: 'pptx_export_failed',
+              sessionId: currentSessionDetails.id,
+              error: statusResponse.error || 'Unknown error',
+            });
+            
+            toast({
+              variant: "destructive",
+              title: "Export failed",
+              description: statusResponse.error || "Failed to export presentation"
+            });
+          }
+        } catch (error) {
+          console.error("Error checking export status:", error);
+        }
+      }, 5000); // Check every 5 seconds
+      
     } catch (error) {
+      setIsExporting(false);
       console.error("Export failed:", error);
+      
+      toast({
+        variant: "destructive",
+        title: "Export failed",
+        description: error instanceof Error ? error.message : "An unknown error occurred"
+      });
     }
   };
 
@@ -370,11 +446,17 @@ export default function SlideEditorPage() {
               slidesLoading || 
               isSessionDetailsLoading || 
               currentSessionDetails?.status !== 'completed' ||
-              !canEdit
+              !canEdit ||
+              isExporting
             } 
             size="sm"
           >
-            Export PPTX
+            {isExporting ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Exporting...
+              </>
+            ) : "Export PPTX"}
           </Button>
         </div>
       </DashboardHeader>

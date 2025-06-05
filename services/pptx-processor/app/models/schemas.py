@@ -255,3 +255,17 @@ class ServiceMetricsResponse(BaseModel):
     uptime_seconds: float
     processing_manager: ProcessingManagerMetrics
     # Potentially add other system metrics later (CPU, memory, etc.)
+
+# Export-related models
+class ExportResponse(BaseModel):
+    """Response after starting an export job."""
+    job_id: str = Field(..., description="Unique identifier for the export job")
+    session_id: str = Field(..., description="Unique identifier for the translation session")
+    status: ProcessingStatus = Field(..., description="Current status of the export job")
+    created_at: Optional[datetime] = Field(default_factory=datetime.now, description="Time when the export job was created")
+    message: Optional[str] = Field(None, description="Informational message")
+
+class DownloadUrlResponse(BaseModel):
+    """Response containing a download URL for an exported file."""
+    download_url: str = Field(..., description="URL to download the exported file")
+    expires_at: datetime = Field(..., description="Time when the download URL expires")

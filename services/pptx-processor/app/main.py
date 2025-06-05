@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 import logging
 from python_json_logger import jsonlogger
 
-from app.api.routes import processing, status, health, metrics
+from app.api.routes import processing, status, health, metrics, export
 from app.core.config import Settings, get_settings
 
 # Imports for ProcessingManager lifecycle
@@ -71,6 +71,7 @@ def create_application() -> FastAPI:
     application.include_router(status.router, prefix="/v1", tags=["status"])
     application.include_router(health.router, prefix="/v1", tags=["health"])
     application.include_router(metrics.router, prefix="/v1", tags=["metrics"])
+    application.include_router(export.router, prefix="/v1", tags=["export"])
 
     return application
 
