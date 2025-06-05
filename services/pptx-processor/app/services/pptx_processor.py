@@ -6,20 +6,11 @@ import asyncio
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 from pptx import Presentation
-from PIL import Image
-from PIL import ImageDraw
-from PIL import ImageFont
+
 import json
 import shutil
-from pptx.enum.text import PP_ALIGN, MSO_VERTICAL_ANCHOR
-from pptx.util import Emu, Pt
-import base64
-from pptx.enum.shapes import MSO_SHAPE_TYPE
-import subprocess
+
 import tempfile
-import glob
-import xml.etree.ElementTree as ET
-import re
 
 from app.models.schemas import (
     ProcessedSlide,
@@ -34,9 +25,16 @@ from app.models.schemas import (
 from app.services.supabase_service import upload_file_to_supabase, update_job_status as update_supabase_job_status
 from app.services.job_status import update_job_status as update_local_job_status, get_job_status
 from app.core.config import get_settings
+from app.core.utils import async_retry
 # Import the new ProcessingManager related functions
 from app.services.processing_manager import get_processing_manager
 from app.services.cache_service import get_cache_service # Import CacheService
+from app.services.svg_generator import generate_svgs
+from app.services.slide_parser import (
+    extract_shapes_enhanced,
+    create_thumbnail_from_slide_enhanced,
+    validate_coordinates_with_svg
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +45,9 @@ settings = get_settings()
 
 # Dictionary to keep track of job file paths for retry capability
 _job_file_paths = {}
+
+
+
 
 
 async def get_job_file_path(job_id: str) -> Optional[str]:
@@ -60,213 +61,6 @@ async def get_job_file_path(job_id: str) -> Optional[str]:
 
     # If not in memory, we can't retrieve it since we don't persistently store file paths
     return None
-
-
-async def _generate_svgs_for_all_slides_unoserver(
-    presentation_path: str,
-    output_dir: str,  # Directory where final slide_N.svg files will be stored
-    slide_count: int
-) -> Dict[int, str]:
-    """
-    Convert all slides from a presentation to SVG files using unoserver UNO API.
-    Uses LibreOffice UNO API to export each slide individually.
-    """
-    if not settings.LIBREOFFICE_PATH or not os.path.exists(settings.LIBREOFFICE_PATH):
-        logger.error(
-            "LibreOffice path not configured or invalid. Cannot generate SVGs.")
-        raise ValueError("LibreOffice not available for SVG generation")
-
-    abs_presentation_path = os.path.abspath(presentation_path)
-    if not os.path.exists(abs_presentation_path):
-        logger.error(f"Presentation file not found: {abs_presentation_path}")
-        raise FileNotFoundError(f"Presentation file not found: {abs_presentation_path}")
-
-    try:
-        logger.info(f"Converting {slide_count} slides from {abs_presentation_path} to SVG using UNO API")
-        
-        # Import UNO modules
-        import uno
-        from com.sun.star.connection import NoConnectException
-        
-        generated_svg_paths: Dict[int, str] = {}
-        
-        # Get the UNO service manager
-        localContext = uno.getComponentContext()
-        resolver = localContext.ServiceManager.createInstanceWithContext(
-            "com.sun.star.bridge.UnoUrlResolver", localContext)
-        
-        try:
-            # Connect to LibreOffice via unoserver
-            ctx = resolver.resolve("uno:socket,host=127.0.0.1,port=2002;urp;StarOffice.ComponentContext")
-            smgr = ctx.ServiceManager
-            
-            # Create desktop
-            desktop = smgr.createInstanceWithContext("com.sun.star.frame.Desktop", ctx)
-            
-            # Convert file path to URL
-            file_url = uno.systemPathToFileUrl(abs_presentation_path)
-            
-            # Load the presentation
-            doc = desktop.loadComponentFromURL(file_url, "_blank", 0, ())
-            
-            if not doc:
-                raise RuntimeError(f"Failed to load document: {abs_presentation_path}")
-            
-            logger.info(f"Loaded presentation via UNO API: {abs_presentation_path}")
-            
-            # Get the draw pages (slides)
-            draw_pages = doc.getDrawPages()
-            actual_slide_count = draw_pages.getCount()
-            
-            logger.info(f"Found {actual_slide_count} slides in presentation")
-            
-            if actual_slide_count != slide_count:
-                logger.warning(f"Expected {slide_count} slides, found {actual_slide_count}")
-            
-            # Export each slide
-            for i in range(actual_slide_count):
-                slide_num = i + 1
-                slide = draw_pages.getByIndex(i)
-                
-                # Create output file path
-                final_svg_name = f"slide_{slide_num}.svg"
-                final_svg_path = os.path.join(output_dir, final_svg_name)
-                output_url = uno.systemPathToFileUrl(os.path.abspath(final_svg_path))
-                
-                try:
-                    # Create export filter properties
-                    filter_props = (
-                        uno.createUnoStruct("com.sun.star.beans.PropertyValue"),
-                        uno.createUnoStruct("com.sun.star.beans.PropertyValue"),
-                    )
-                    
-                    filter_props[0].Name = "FilterName"
-                    filter_props[0].Value = "draw_svg_Export"
-                    
-                    filter_props[1].Name = "ExportOnlySelection"
-                    filter_props[1].Value = True
-                    
-                    # Select the current slide
-                    controller = doc.getCurrentController()
-                    try:
-                        controller.setCurrentPage(slide)
-                    except:
-                        # If setCurrentPage fails, try alternative approach
-                        pass
-                    
-                    # Create a temporary single-slide document for export
-                    # This is a more reliable approach than trying to export selected content
-                    temp_doc = desktop.loadComponentFromURL("private:factory/simpress", "_blank", 0, ())
-                    temp_pages = temp_doc.getDrawPages()
-                    
-                    # Clear the default slide and copy our slide
-                    temp_pages.remove(temp_pages.getByIndex(0))
-                    # Copy slide content to the temp document
-                    temp_pages.insertByIndex(0, slide)
-                    
-                    # Export the temporary document
-                    export_props = (uno.createUnoStruct("com.sun.star.beans.PropertyValue"),)
-                    export_props[0].Name = "FilterName"
-                    export_props[0].Value = "draw_svg_Export"
-                    
-                    temp_doc.storeToURL(output_url, export_props)
-                    temp_doc.close(True)
-                    
-                    if os.path.exists(final_svg_path):
-                        generated_svg_paths[slide_num] = final_svg_path
-                        logger.info(f"Successfully generated SVG for slide {slide_num}: {final_svg_path}")
-                    else:
-                        logger.warning(f"SVG file not created for slide {slide_num}")
-                    
-                except Exception as e:
-                    logger.error(f"Error exporting slide {slide_num}: {e}")
-                    # Continue with other slides even if one fails
-                    continue
-            
-            # Close the original document
-            doc.close(True)
-            
-        except NoConnectException:
-            logger.error("Could not connect to LibreOffice UNO server. Make sure unoserver is running on port 2002.")
-            raise RuntimeError("LibreOffice UNO server not available")
-        
-        if not generated_svg_paths:
-            logger.error("No SVG files were generated successfully")
-            raise RuntimeError("SVG generation failed - no output files")
-            
-        if len(generated_svg_paths) != slide_count:
-            logger.warning(f"Expected {slide_count} SVG files, got {len(generated_svg_paths)}")
-            # Continue with partial success rather than failing completely
-        
-        logger.info(f"Successfully generated SVGs for {len(generated_svg_paths)} slides")
-        return generated_svg_paths
-
-    except ImportError as e:
-        logger.error(f"UNO Python modules not available: {e}")
-        logger.error("Falling back to LibreOffice command-line approach")
-        # Fall back to the original LibreOffice command approach
-        return await _generate_svgs_fallback_libreoffice(presentation_path, output_dir, slide_count)
-        
-    except Exception as e:
-        logger.error(f"Unexpected error during UNO SVG generation: {str(e)}", exc_info=True)
-        raise
-
-
-async def _generate_svgs_fallback_libreoffice(
-    presentation_path: str,
-    output_dir: str,
-    slide_count: int
-) -> Dict[int, str]:
-    """
-    Fallback method using direct LibreOffice command for when UNO API is not available.
-    This will only generate the first slide but allows the system to continue functioning.
-    """
-    logger.warning("Using LibreOffice fallback method - only first slide will be converted")
-    
-    abs_presentation_path = os.path.abspath(presentation_path)
-    
-    # Single LibreOffice command to convert presentation to SVG (first slide only)
-    command = [
-        settings.LIBREOFFICE_PATH,
-        "--headless",
-        "--convert-to", "svg:impress_svg_Export",
-        "--outdir", output_dir,
-        abs_presentation_path
-    ]
-    
-    logger.info(f"Running LibreOffice fallback command: {' '.join(command)}")
-    
-    try:
-        process = subprocess.run(
-            command,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=300  # 5 minutes timeout
-        )
-        
-        # Find generated SVG file
-        svg_files = glob.glob(os.path.join(output_dir, "*.svg"))
-        
-        if svg_files:
-            # Rename to expected format
-            original_svg = svg_files[0]
-            final_svg_path = os.path.join(output_dir, "slide_1.svg")
-            
-            if original_svg != final_svg_path:
-                shutil.move(original_svg, final_svg_path)
-            
-            logger.warning("Fallback method: only slide 1 was converted")
-            return {1: final_svg_path}
-        else:
-            raise RuntimeError("LibreOffice fallback failed - no SVG generated")
-            
-    except subprocess.CalledProcessError as e:
-        logger.error(f"LibreOffice fallback command failed: {e}")
-        raise RuntimeError(f"LibreOffice fallback SVG generation failed: {e}")
-    except subprocess.TimeoutExpired:
-        logger.error("LibreOffice fallback conversion timed out")
-        raise RuntimeError("LibreOffice fallback SVG generation timed out")
 
 
 async def queue_pptx_processing(
@@ -423,16 +217,9 @@ async def process_pptx(
 
     try:
         # Validate LibreOffice availability upfront
-        if not settings.LIBREOFFICE_PATH or not os.path.exists(settings.LIBREOFFICE_PATH):
-            raise ValueError("LibreOffice not configured or not found")
-
-        # Test LibreOffice functionality
-        try:
-            test_command = [settings.LIBREOFFICE_PATH, "--help"]
-            subprocess.run(test_command, check=True, capture_output=True, text=True, timeout=30)
-            logger.info(f"LibreOffice is available at: {settings.LIBREOFFICE_PATH}")
-        except Exception as e:
-            raise RuntimeError(f"LibreOffice test failed: {str(e)}")
+        from app.services.svg_generator import validate_libreoffice_availability
+        if not validate_libreoffice_availability():
+            raise ValueError("LibreOffice not configured or not available")
 
         presentation = Presentation(file_path)
         slide_count = len(presentation.slides)
@@ -454,14 +241,16 @@ async def process_pptx(
             )
         )
 
-        libreoffice_svgs = await _generate_svgs_for_all_slides_unoserver(
-            file_path, processing_output_dir, slide_count
+        # Use the new svg_generator module
+        generated_svg_paths = await generate_svgs(
+            presentation_path=file_path,
+            output_dir=processing_output_dir,
+            slide_count=slide_count
         )
+        if not generated_svg_paths:
+            raise RuntimeError("SVG generation failed to produce any files.")
         
-        if not libreoffice_svgs or len(libreoffice_svgs) != slide_count:
-            raise RuntimeError(f"LibreOffice SVG generation failed - expected {slide_count} SVGs, got {len(libreoffice_svgs)}")
-
-        logger.info(f"Successfully generated {len(libreoffice_svgs)} SVGs using LibreOffice")
+        logger.info(f"Generated {len(generated_svg_paths)} SVG files.", extra={"slide_count": slide_count, "output_dir": processing_output_dir})
 
         # Process each slide with enhanced text extraction
         processed_slides_data = []
@@ -477,7 +266,7 @@ async def process_pptx(
             )
 
             # Verify LibreOffice SVG exists for this slide
-            svg_path = libreoffice_svgs.get(slide_number)
+            svg_path = generated_svg_paths.get(slide_number)
             if not svg_path or not os.path.exists(svg_path):
                 raise RuntimeError(f"LibreOffice SVG missing for slide {slide_number}")
 
@@ -604,861 +393,74 @@ async def process_slide_simplified(
     generate_thumbnail: bool = True
 ) -> ProcessedSlide:
     """
-    Process a single slide using simplified LibreOffice-only approach.
-    Enhanced text extraction optimized for translation workflows with coordinate validation.
+    Processes a single slide: extracts shapes, creates thumbnail, uploads assets.
+    This is now an orchestrator for the slide_parser module.
     """
-    slide_id = str(uuid.uuid4())
+    start_time = time.time()
+    log_context = {"session_id": session_id, "slide_number": slide_number}
+    logger.info("Processing slide", extra=log_context)
 
-    # Get slide dimensions
-    presentation = slide.part.package.presentation_part.presentation
-    slide_width_emu = presentation.slide_width
-    slide_height_emu = presentation.slide_height
-
-    # Enhanced text extraction optimized for translation
-    extracted_shapes_data = extract_shapes_enhanced(slide, slide_width_emu, slide_height_emu)
-
-    # Validate and cross-reference coordinates with LibreOffice SVG
-    validated_shapes_data = await validate_coordinates_with_svg(
-        extracted_shapes_data, svg_path, slide_width_emu, slide_height_emu
-    )
-
-    # Add text segmentation for translation-ready units
-    for shape in validated_shapes_data:
-        if shape.shape_type == ShapeType.TEXT and shape.original_text:
-            # Segment text for better translation workflow
-            text_segments = segment_text_for_translation(shape.original_text, max_segment_length=150)
-            
-            # Add segmentation metadata to shape
-            shape_dict = shape.dict()
-            shape_dict.update({
-                'text_segments': text_segments,
-                'segment_count': len(text_segments),
-                'is_segmented': len(text_segments) > 1
-            })
-            
-            # Update the shape with new metadata
-            validated_shapes_data[validated_shapes_data.index(shape)] = SlideShape(**shape_dict)
-
-    # Upload LibreOffice SVG to Supabase
-    svg_url = await upload_file_to_supabase(
-        file_path=svg_path,
-        bucket="slide-visuals", 
-        destination_path=f"{session_id}/slide_{slide_number}.svg"
-    )
-
-    # Generate thumbnail if requested
-    thumbnail_url = None
-    if generate_thumbnail:
-        thumbnail_file = f"{svg_path}_thumbnail.png"
-        create_thumbnail_from_slide_enhanced(
-            slide, validated_shapes_data, thumbnail_file, slide_width_emu, slide_height_emu
-        )
-        
-        if os.path.exists(thumbnail_file):
-            thumbnail_url = await upload_file_to_supabase(
-                file_path=thumbnail_file,
-                bucket="slide-visuals", 
-                destination_path=f"{session_id}/thumbnails/slide_{slide_number}.png"
-            )
-
-    return ProcessedSlide(
-        slide_id=slide_id, 
-        slide_number=slide_number, 
-        svg_url=svg_url or "",
-        original_width=slide_width_emu, 
-        original_height=slide_height_emu,
-        thumbnail_url=thumbnail_url, 
-        shapes=extracted_shapes_data
-    )
-
-
-def get_slide_background_fill(slide) -> str:
-    """
-    Attempts to get the slide background fill color.
-    Returns a hex color string (e.g., "#FFFFFF") or a default.
-    Note: python-pptx has limitations in accessing complex background fills (gradients, pictures).
-    This function will try to get solid fills.
-    """
     try:
-        fill = slide.background.fill
-        if fill.type == 1:  # MSO_FILL.SOLID
-            rgb = fill.fore_color.rgb
-            return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
-        # Handling for MSO_FILL.GRADIENT, MSO_FILL.PATTERN, MSO_FILL.PICTURE etc. is more complex
-        # and often not fully exposed or easily convertible to a single SVG color.
-    except Exception as e:
-        logger.debug(f"Could not determine slide background color: {e}")
-    return "#ffffff"  # Default to white
+        slide_width_emu = slide.parent.slide_width
+        slide_height_emu = slide.parent.slide_height
 
+        shapes_data = extract_shapes_enhanced(slide, slide_width_emu, slide_height_emu)
+        shapes_data = await validate_coordinates_with_svg(shapes_data, svg_path, slide_width_emu, slide_height_emu)
+        logger.info(f"Extracted {len(shapes_data)} shapes from slide.", extra={**log_context, "shape_count": len(shapes_data)})
 
-def extract_shapes_enhanced(slide, slide_width_emu: int, slide_height_emu: int) -> List[SlideShape]:
-    """
-    Enhanced text extraction optimized for translation workflows.
-    Provides more accurate coordinates and translation-focused metadata.
-    """
-    shapes_data = []
-    
-    if slide_width_emu == 0 or slide_height_emu == 0:
-        logger.warning("Slide dimensions are zero, cannot calculate shape coordinates.")
-        return []
+        svg_object_name = f"{session_id}/slides/slide_{slide_number}.svg"
+        svg_url = await upload_file_to_supabase(
+            svg_path, settings.SUPABASE_SLIDES_BUCKET, svg_object_name
+        )
+        logger.info("Uploaded SVG to Supabase.", extra={**log_context, "svg_url": svg_url})
 
-    for idx, shape in enumerate(slide.shapes):
-        # More precise coordinate calculations
-        shape_left_emu = shape.left if shape.left is not None else 0
-        shape_top_emu = shape.top if shape.top is not None else 0
-        shape_width_emu = shape.width if shape.width is not None else 0
-        shape_height_emu = shape.height if shape.height is not None else 0
-
-        # Convert to absolute pixel coordinates for better precision
-        EMU_PER_INCH = 914400
-        DPI = 96
-        
-        # Calculate absolute coordinates in pixels
-        x_px = int((shape_left_emu / EMU_PER_INCH) * DPI)
-        y_px = int((shape_top_emu / EMU_PER_INCH) * DPI)
-        width_px = int((shape_width_emu / EMU_PER_INCH) * DPI)
-        height_px = int((shape_height_emu / EMU_PER_INCH) * DPI)
-
-        shape_obj_data = {
-            "shape_id": str(uuid.uuid4()),
-            "x_coordinate": x_px,  # Using absolute pixels for better precision
-            "y_coordinate": y_px,
-            "width": width_px,
-            "height": height_px,
-            "coordinates_unit": CoordinateUnit.PIXELS,  # Changed to pixels
-            "reading_order": idx + 1,
-            "original_text": None,
-        }
-
-        # Handle text frames with enhanced translation metadata
-        if shape.has_text_frame:
-            text_frame = shape.text_frame
-            full_text = text_frame.text.strip() if text_frame.text else ""
-            if not full_text:
-                continue
-
-            shape_obj_data["original_text"] = full_text
-
-            # Enhanced font and style extraction
-            font_size_pt = 12.0
-            font_family = "Arial"
-            font_weight = "normal"
-            font_style = "normal"
-            hex_color = "#000000"
-            text_align_str = "LEFT"
-            vertical_anchor_str = "TOP"
-            line_spacing_val = 1.0
-
-            # Determine if this is a title or subtitle based on placeholder type
-            is_title = False
-            is_subtitle = False
-            placeholder_type = None
-            
-            try:
-                if hasattr(shape, 'placeholder_format') and shape.placeholder_format:
-                    placeholder_type = str(shape.placeholder_format.type)
-                    # Common title placeholder types in PowerPoint
-                    if 'TITLE' in placeholder_type.upper():
-                        is_title = True
-                    elif 'SUBTITLE' in placeholder_type.upper():
-                        is_subtitle = True
-            except:
-                # Fallback: detect titles by position and font size
-                slide_height_px = int((slide_height_emu / EMU_PER_INCH) * DPI)
-                if y_px < slide_height_px * 0.3 and height_px > 40:  # Top 30% and large text
-                    is_title = True
-
-            # Enhanced text analysis for translation
-            text_length = len(full_text)
-            word_count = len(full_text.split())
-            
-            # Translation priority based on position and content type
-            translation_priority = 5  # Default medium priority
-            if is_title:
-                translation_priority = 10  # Highest priority
-            elif is_subtitle:
-                translation_priority = 8
-            elif word_count > 20:  # Long text blocks
-                translation_priority = 7
-            elif word_count < 5:  # Short text, might be labels
-                translation_priority = 3
-
-            # Extract detailed font information
-            if text_frame.paragraphs:
-                first_paragraph = text_frame.paragraphs[0]
-
-                # Text alignment
-                if first_paragraph.alignment:
-                    alignment_map = {
-                        PP_ALIGN.LEFT: "LEFT", PP_ALIGN.CENTER: "CENTER",
-                        PP_ALIGN.RIGHT: "RIGHT", PP_ALIGN.JUSTIFY: "JUSTIFY",
-                        PP_ALIGN.DISTRIBUTE: "DISTRIBUTE"
-                    }
-                    text_align_str = alignment_map.get(first_paragraph.alignment, "LEFT")
-
-                # Font properties from first run
-                if first_paragraph.runs:
-                    first_run = first_paragraph.runs[0]
-                    if first_run.font:
-                        font = first_run.font
-                        if font.size:
-                            font_size_pt = font.size.pt
-                        if font.name:
-                            font_family = font.name
-                        if font.bold:
-                            font_weight = "bold"
-                        if font.italic:
-                            font_style = "italic"
-                        if font.color and hasattr(font.color, 'rgb') and font.color.rgb:
-                            try:
-                                hex_color = f"#{font.color.rgb[0]:02x}{font.color.rgb[1]:02x}{font.color.rgb[2]:02x}"
-                            except:
-                                hex_color = "#000000"
-
-            # Vertical anchor
-            if text_frame.vertical_anchor:
-                anchor_map = {
-                    MSO_VERTICAL_ANCHOR.TOP: "TOP",
-                    MSO_VERTICAL_ANCHOR.MIDDLE: "MIDDLE",
-                    MSO_VERTICAL_ANCHOR.BOTTOM: "BOTTOM"
-                }
-                vertical_anchor_str = anchor_map.get(text_frame.vertical_anchor, "TOP")
-
-            # Enhanced shape data for translation optimization
-            shape_obj_data.update({
-                "shape_type": ShapeType.TEXT,
-                "font_size": font_size_pt,
-                "font_family": font_family,
-                "font_weight": font_weight,
-                "font_style": font_style,
-                "color": hex_color,
-                "text_align": text_align_str,
-                "vertical_anchor": vertical_anchor_str,
-                "line_spacing": line_spacing_val,
-                # Translation-specific metadata
-                "is_title": is_title,
-                "is_subtitle": is_subtitle,
-                "text_length": text_length,
-                "word_count": word_count,
-                "translation_priority": translation_priority,
-                "placeholder_type": placeholder_type,
-                # Initialize coordinate validation fields
-                "coordinate_validation_score": None,
-                "svg_matched": None,
-                "svg_original_x": None,
-                "svg_original_y": None,
-                "coordinate_source": "pptx_extraction"
-            })
-            
-            shapes_data.append(SlideShape(**shape_obj_data))
-
-        # Handle images (simplified for now, focus on text)
-        elif shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
-            try:
-                shape_obj_data.update({
-                    "shape_type": ShapeType.IMAGE,
-                    "is_title": False,
-                    "is_subtitle": False,
-                    "text_length": 0,
-                    "word_count": 0,
-                    "translation_priority": 1,  # Low priority for images
-                    # Initialize coordinate validation fields for images
-                    "coordinate_validation_score": None,
-                    "svg_matched": None,
-                    "svg_original_x": None,
-                    "svg_original_y": None,
-                    "coordinate_source": "pptx_extraction"
-                })
-                shapes_data.append(SlideShape(**shape_obj_data))
-            except Exception as e:
-                logger.warning(f"Could not process image shape {idx}: {e}")
-                continue
-
-    return shapes_data
-
-
-def create_thumbnail_from_slide_enhanced(
-    slide,  # python-pptx slide object
-    shapes_data: List[SlideShape],  # Pre-extracted shapes data
-    file_path: str,
-    slide_width_emu: int,
-    slide_height_emu: int,
-    thumbnail_width_px: int = 250
-) -> None:
-    """
-    Enhanced thumbnail generation optimized for translation preview.
-    Creates a high-quality thumbnail that clearly shows text layout.
-    """
-    EMU_PER_INCH = 914400
-    DPI = 96
-    POINTS_PER_INCH = 72
-
-    # Calculate original dimensions in pixels
-    original_width_px = max(1, int((slide_width_emu / EMU_PER_INCH) * DPI))
-    original_height_px = max(1, int((slide_height_emu / EMU_PER_INCH) * DPI))
-
-    # Calculate thumbnail dimensions maintaining aspect ratio
-    aspect_ratio = original_height_px / original_width_px
-    thumbnail_height_px = int(thumbnail_width_px * aspect_ratio)
-
-    # Create high-quality thumbnail
-    thumbnail = Image.new('RGB', (thumbnail_width_px, thumbnail_height_px), 'white')
-    draw = ImageDraw.Draw(thumbnail)
-
-    # Scale factors for thumbnail
-    scale_x = thumbnail_width_px / original_width_px
-    scale_y = thumbnail_height_px / original_height_px
-
-    # Draw slide background
-    background_color = get_slide_background_fill(slide)
-    if background_color and background_color != "#ffffff":
-        try:
-            thumbnail.paste(background_color, (0, 0, thumbnail_width_px, thumbnail_height_px))
-        except:
-            pass  # Use white background as fallback
-
-    # Draw text shapes with better visibility for translation preview
-    for shape_data in shapes_data:
-        if shape_data.shape_type != ShapeType.TEXT or not shape_data.original_text:
-            continue
-
-        # Scale coordinates for thumbnail
-        x = int(shape_data.x_coordinate * scale_x)
-        y = int(shape_data.y_coordinate * scale_y)
-        width = int(shape_data.width * scale_x)
-        height = int(shape_data.height * scale_y)
-
-        # Ensure minimum visible size
-        width = max(width, 10)
-        height = max(height, 8)
-
-        # Draw text background for better visibility
-        bg_color = (240, 240, 240, 128)  # Light gray with transparency
-        if shape_data.is_title:
-            bg_color = (255, 255, 200, 128)  # Light yellow for titles
-        elif shape_data.is_subtitle:
-            bg_color = (255, 240, 200, 128)  # Light orange for subtitles
-
-        try:
-            draw.rectangle([x, y, x + width, y + height], fill=bg_color[:3], outline=(200, 200, 200))
-        except:
-            pass
-
-        # Draw text with appropriate size for thumbnail
-        try:
-            # Use a standard font for thumbnails
-            font_size = max(8, min(16, int((shape_data.font_size or 12) * scale_y * 0.8)))
-            
-            # Simplified text rendering - just show that text exists
-            text_preview = shape_data.original_text[:50] + "..." if len(shape_data.original_text) > 50 else shape_data.original_text
-            
-            # Text color with good contrast
-            text_color = (0, 0, 0)  # Black for good visibility in thumbnails
-            if shape_data.color and shape_data.color != "#000000":
+        thumbnail_url = ""
+        if generate_thumbnail:
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp_thumb_file:
                 try:
-                    # Convert hex to RGB
-                    hex_color = shape_data.color.lstrip('#')
-                    text_color = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-                except:
-                    text_color = (0, 0, 0)
+                    create_thumbnail_from_slide_enhanced(
+                        slide, shapes_data, temp_thumb_file.name, slide_width_emu, slide_height_emu
+                    )
+                    thumb_object_name = f"{session_id}/thumbnails/thumbnail_{slide_number}.png"
+                    thumbnail_url = await upload_file_to_supabase(
+                        temp_thumb_file.name, settings.SUPABASE_THUMBNAILS_BUCKET, thumb_object_name
+                    )
+                    logger.info("Uploaded thumbnail to Supabase.", extra={**log_context, "thumbnail_url": thumbnail_url})
+                finally:
+                    os.remove(temp_thumb_file.name)
 
-            # Draw text (simplified approach for thumbnails)
-            draw.text((x + 2, y + 2), text_preview, fill=text_color)
-            
-        except Exception as e:
-            logger.debug(f"Could not draw text in thumbnail: {e}")
-            # Draw a simple text indicator
-            draw.rectangle([x + 2, y + 2, x + width - 2, y + 10], fill=(100, 100, 100))
-
-    # Save thumbnail
-    try:
-        thumbnail.save(file_path, 'PNG', quality=95, optimize=True)
-        logger.info(f"Enhanced thumbnail saved: {file_path}")
-    except Exception as e:
-        logger.error(f"Error saving enhanced thumbnail: {e}")
-        # Create a simple fallback thumbnail
-        fallback = Image.new('RGB', (thumbnail_width_px, thumbnail_height_px), 'white')
-        fallback.save(file_path, 'PNG')
-
-
-async def validate_coordinates_with_svg(
-    shapes_data: List[SlideShape],
-    svg_path: str,
-    slide_width_emu: int,
-    slide_height_emu: int
-) -> List[SlideShape]:
-    """
-    Enhanced cross-reference validation of extracted coordinates against LibreOffice SVG output.
-    Provides more accurate coordinate mapping and better text matching for translation workflows.
-    """
-    if not os.path.exists(svg_path):
-        logger.warning(f"SVG file not found for coordinate validation: {svg_path}")
-        # Mark all shapes as unvalidated but with source information
-        return _mark_shapes_as_unvalidated(shapes_data, "svg_file_missing")
-
-    try:
-        # Parse the LibreOffice-generated SVG with namespace handling
-        tree = ET.parse(svg_path)
-        root = tree.getroot()
+        end_time = time.time()
+        slide_processing_time = end_time - start_time
+        logger.info(f"Finished processing slide in {slide_processing_time:.2f}s", extra={**log_context, "duration_seconds": slide_processing_time})
         
-        # Handle SVG namespace prefixes
-        namespaces = {'svg': 'http://www.w3.org/2000/svg'}
-        if root.tag.startswith('{'):
-            # Extract namespace from root tag
-            namespace = root.tag.split('}')[0][1:]
-            namespaces['svg'] = namespace
-
-        # Enhanced SVG dimension parsing
-        svg_info = _extract_svg_dimensions(root)
-        
-        # Calculate coordinate transformation factors
-        EMU_PER_INCH = 914400
-        DPI = 96
-        
-        # Original slide dimensions in pixels
-        slide_width_px = int((slide_width_emu / EMU_PER_INCH) * DPI)
-        slide_height_px = int((slide_height_emu / EMU_PER_INCH) * DPI)
-        
-        # Calculate more accurate scaling factors
-        transform_info = _calculate_coordinate_transform(
-            svg_info, slide_width_px, slide_height_px
+        return ProcessedSlide(
+            slide_number=slide_number,
+            session_id=session_id,
+            svg_url=svg_url,
+            thumbnail_url=thumbnail_url,
+            shapes=shapes_data,
+            processing_status="completed",
+            processing_time_seconds=slide_processing_time,
         )
-        
-        logger.info(f"SVG validation transform: slide({slide_width_px}x{slide_height_px}) -> "
-                   f"svg({svg_info['width']}x{svg_info['height']}), "
-                   f"scale({transform_info['scale_x']:.4f}, {transform_info['scale_y']:.4f})")
-
-        # Enhanced text element extraction from SVG
-        svg_text_elements = _extract_svg_text_elements(root, namespaces)
-        
-        logger.info(f"Found {len(svg_text_elements)} text elements in SVG for validation")
-
-        # Cross-reference and validate coordinates with enhanced matching
-        validated_shapes = []
-        validation_stats = {'exact_matches': 0, 'fuzzy_matches': 0, 'no_matches': 0}
-        
-        for shape in shapes_data:
-            if shape.shape_type != ShapeType.TEXT or not shape.original_text:
-                # Non-text shapes get minimal validation metadata
-                shape_dict = shape.dict()
-                shape_dict.update({
-                    'coordinate_validation_score': None,
-                    'svg_matched': False,
-                    'coordinate_source': 'pptx_extraction'
-                })
-                validated_shapes.append(SlideShape(**shape_dict))
-                continue
-
-            # Enhanced text matching with multiple strategies
-            match_result = _find_best_svg_text_match(shape.original_text, svg_text_elements)
-            
-            if match_result['score'] > 0.0:
-                # Apply coordinate transformation and validation
-                validated_shape = _apply_coordinate_validation(
-                    shape, match_result, transform_info
-                )
-                validated_shapes.append(validated_shape)
-                
-                # Update statistics
-                if match_result['score'] >= 0.95:
-                    validation_stats['exact_matches'] += 1
-                else:
-                    validation_stats['fuzzy_matches'] += 1
-                    
-                logger.debug(f"Validated coordinates for text '{shape.original_text[:30]}...': "
-                           f"({shape.x_coordinate}, {shape.y_coordinate}) -> "
-                           f"({validated_shape.x_coordinate}, {validated_shape.y_coordinate}), "
-                           f"score: {match_result['score']:.3f}")
-            else:
-                # No match found - keep original coordinates but mark as unvalidated
-                shape_dict = shape.dict()
-                shape_dict.update({
-                    'coordinate_validation_score': 0.0,
-                    'svg_matched': False,
-                    'coordinate_source': 'pptx_extraction',
-                    'svg_original_x': None,
-                    'svg_original_y': None
-                })
-                validated_shapes.append(SlideShape(**shape_dict))
-                validation_stats['no_matches'] += 1
-
-        # Log validation summary
-        total_text_shapes = validation_stats['exact_matches'] + validation_stats['fuzzy_matches'] + validation_stats['no_matches']
-        if total_text_shapes > 0:
-            match_rate = (validation_stats['exact_matches'] + validation_stats['fuzzy_matches']) / total_text_shapes * 100
-            logger.info(f"SVG validation summary: {total_text_shapes} text shapes, "
-                       f"{validation_stats['exact_matches']} exact, "
-                       f"{validation_stats['fuzzy_matches']} fuzzy, "
-                       f"{validation_stats['no_matches']} unmatched, "
-                       f"{match_rate:.1f}% match rate")
-
-        return validated_shapes
 
     except Exception as e:
-        logger.warning(f"Error during coordinate validation: {str(e)}", exc_info=True)
-        # Return original shapes with error metadata
-        return _mark_shapes_as_unvalidated(shapes_data, f"validation_error: {str(e)}")
+        end_time = time.time()
+        slide_processing_time = end_time - start_time
+        error_message = f"Failed to process slide {slide_number}: {e}"
+        logger.error(error_message, extra={**log_context, "error": str(e)}, exc_info=True)
+        return ProcessedSlide(
+            slide_number=slide_number,
+            session_id=session_id,
+            svg_url="",
+            thumbnail_url="",
+            shapes=[],
+            processing_status="failed",
+            error_message=str(e),
+            processing_time_seconds=slide_processing_time,
+        )
 
 
-def _mark_shapes_as_unvalidated(shapes_data: List[SlideShape], reason: str) -> List[SlideShape]:
-    """Mark all shapes as unvalidated with error information."""
-    validated_shapes = []
-    for shape in shapes_data:
-        shape_dict = shape.dict()
-        shape_dict.update({
-            'coordinate_validation_score': None,
-            'svg_matched': False,
-            'coordinate_source': f'pptx_extraction_only ({reason})',
-            'svg_original_x': None,
-            'svg_original_y': None
-        })
-        validated_shapes.append(SlideShape(**shape_dict))
-    return validated_shapes
 
-
-def _extract_svg_dimensions(root) -> Dict[str, Any]:
-    """Extract SVG dimensions with better parsing of units and viewBox."""
-    svg_info = {
-        'width': None,
-        'height': None,
-        'viewbox': None,
-        'units': 'px'
-    }
-    
-    # Get SVG dimensions
-    width_attr = root.get('width', '')
-    height_attr = root.get('height', '')
-    viewbox_attr = root.get('viewBox', '')
-    
-    # Parse dimensions with unit detection
-    if width_attr and height_attr:
-        try:
-            # Extract numeric value and unit
-            width_match = re.match(r'([\d.]+)(\w*)', width_attr.strip())
-            height_match = re.match(r'([\d.]+)(\w*)', height_attr.strip())
-            
-            if width_match and height_match:
-                svg_info['width'] = float(width_match.group(1))
-                svg_info['height'] = float(height_match.group(1))
-                
-                # Detect units (pt, px, mm, cm, in)
-                unit = width_match.group(2) or 'px'
-                svg_info['units'] = unit
-                
-                # Convert to pixels if needed
-                if unit == 'pt':
-                    svg_info['width'] = svg_info['width'] * 96 / 72  # Points to pixels
-                    svg_info['height'] = svg_info['height'] * 96 / 72
-                elif unit == 'mm':
-                    svg_info['width'] = svg_info['width'] * 96 / 25.4  # MM to pixels
-                    svg_info['height'] = svg_info['height'] * 96 / 25.4
-                elif unit == 'cm':
-                    svg_info['width'] = svg_info['width'] * 96 / 2.54  # CM to pixels
-                    svg_info['height'] = svg_info['height'] * 96 / 2.54
-                elif unit == 'in':
-                    svg_info['width'] = svg_info['width'] * 96  # Inches to pixels
-                    svg_info['height'] = svg_info['height'] * 96
-        except Exception as e:
-            logger.debug(f"Error parsing SVG dimensions: {e}")
-    
-    # Parse viewBox if available and dimensions are missing
-    if viewbox_attr:
-        try:
-            viewbox_parts = viewbox_attr.split()
-            if len(viewbox_parts) == 4:
-                viewbox = [float(x) for x in viewbox_parts]
-                svg_info['viewbox'] = viewbox
-                
-                if not svg_info['width'] or not svg_info['height']:
-                    svg_info['width'] = viewbox[2] - viewbox[0]
-                    svg_info['height'] = viewbox[3] - viewbox[1]
-        except Exception as e:
-            logger.debug(f"Error parsing SVG viewBox: {e}")
-    
-    return svg_info
-
-
-def _calculate_coordinate_transform(svg_info: Dict[str, Any], slide_width_px: int, slide_height_px: int) -> Dict[str, float]:
-    """Calculate coordinate transformation factors with better accuracy."""
-    transform_info = {
-        'scale_x': 1.0,
-        'scale_y': 1.0,
-        'offset_x': 0.0,
-        'offset_y': 0.0,
-        'needs_transform': False
-    }
-    
-    if svg_info['width'] and svg_info['height']:
-        transform_info['scale_x'] = svg_info['width'] / slide_width_px
-        transform_info['scale_y'] = svg_info['height'] / slide_height_px
-        
-        # Check if transformation is needed (with small tolerance for floating point errors)
-        if abs(transform_info['scale_x'] - 1.0) > 0.001 or abs(transform_info['scale_y'] - 1.0) > 0.001:
-            transform_info['needs_transform'] = True
-        
-        # Handle viewBox offset if present
-        if svg_info['viewbox']:
-            transform_info['offset_x'] = svg_info['viewbox'][0]
-            transform_info['offset_y'] = svg_info['viewbox'][1]
-    
-    return transform_info
-
-
-def _extract_svg_text_elements(root, namespaces: Dict[str, str]) -> List[Dict[str, Any]]:
-    """Enhanced text element extraction from SVG with better text parsing."""
-    svg_text_elements = []
-    
-    # Look for various text elements that LibreOffice might generate
-    text_selectors = [
-        'text',
-        'tspan',
-        './/text',
-        './/tspan',
-        './/{http://www.w3.org/2000/svg}text',
-        './/{http://www.w3.org/2000/svg}tspan'
-    ]
-    
-    processed_texts = set()  # Avoid duplicates
-    
-    for selector in text_selectors:
-        try:
-            if selector.startswith('.//'):
-                elements = root.findall(selector)
-            else:
-                elements = root.iter(selector)
-            
-            for text_elem in elements:
-                text_content = _extract_text_content(text_elem)
-                if not text_content or text_content in processed_texts:
-                    continue
-                
-                processed_texts.add(text_content)
-                
-                # Extract position attributes with better parsing
-                position_data = _extract_text_position(text_elem)
-                if position_data:
-                    svg_text_elements.append({
-                        'text': text_content,
-                        'x': position_data['x'],
-                        'y': position_data['y'],
-                        'width': position_data.get('width'),
-                        'height': position_data.get('height'),
-                        'element': text_elem,
-                        'style': _extract_text_style(text_elem)
-                    })
-                    
-        except Exception as e:
-            logger.debug(f"Error processing text selector {selector}: {e}")
-            continue
-    
-    return svg_text_elements
-
-
-def _extract_text_content(text_elem) -> str:
-    """Extract complete text content from SVG text element including nested tspans."""
-    text_parts = []
-    
-    # Get direct text content
-    if text_elem.text:
-        text_parts.append(text_elem.text.strip())
-    
-    # Get text from nested elements (tspan, etc.)
-    for child in text_elem:
-        if child.text:
-            text_parts.append(child.text.strip())
-        if child.tail:
-            text_parts.append(child.tail.strip())
-    
-    # Get tail text
-    if text_elem.tail:
-        text_parts.append(text_elem.tail.strip())
-    
-    return ' '.join(filter(None, text_parts)).strip()
-
-
-def _extract_text_position(text_elem) -> Optional[Dict[str, float]]:
-    """Extract position and size information from SVG text element."""
-    try:
-        # Extract x, y coordinates
-        x_attr = text_elem.get('x', '0')
-        y_attr = text_elem.get('y', '0')
-        
-        # Handle comma-separated or space-separated coordinates
-        x_vals = re.findall(r'[\d.-]+', x_attr)
-        y_vals = re.findall(r'[\d.-]+', y_attr)
-        
-        if not x_vals or not y_vals:
-            return None
-        
-        x_val = float(x_vals[0])
-        y_val = float(y_vals[0])
-        
-        position_data = {'x': x_val, 'y': y_val}
-        
-        # Try to extract width and height if available
-        width_attr = text_elem.get('width')
-        height_attr = text_elem.get('height')
-        
-        if width_attr:
-            width_vals = re.findall(r'[\d.-]+', width_attr)
-            if width_vals:
-                position_data['width'] = float(width_vals[0])
-        
-        if height_attr:
-            height_vals = re.findall(r'[\d.-]+', height_attr)
-            if height_vals:
-                position_data['height'] = float(height_vals[0])
-        
-        return position_data
-        
-    except Exception as e:
-        logger.debug(f"Error extracting text position: {e}")
-        return None
-
-
-def _extract_text_style(text_elem) -> Dict[str, str]:
-    """Extract style information from SVG text element."""
-    style_info = {}
-    
-    # Get style attribute
-    style_attr = text_elem.get('style', '')
-    if style_attr:
-        # Parse CSS-style properties
-        for prop in style_attr.split(';'):
-            if ':' in prop:
-                key, value = prop.split(':', 1)
-                style_info[key.strip()] = value.strip()
-    
-    # Get individual style attributes
-    for attr in ['font-family', 'font-size', 'font-weight', 'fill', 'text-anchor']:
-        value = text_elem.get(attr)
-        if value:
-            style_info[attr] = value
-    
-    return style_info
-
-
-def _find_best_svg_text_match(shape_text: str, svg_text_elements: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Enhanced text matching with multiple strategies and scoring."""
-    if not shape_text or not svg_text_elements:
-        return {'score': 0.0, 'match': None, 'strategy': 'no_candidates'}
-    
-    shape_text_clean = shape_text.strip()
-    best_match = None
-    best_score = 0.0
-    best_strategy = 'no_match'
-    
-    for svg_text in svg_text_elements:
-        svg_text_clean = svg_text['text'].strip()
-        
-        # Strategy 1: Exact match
-        if shape_text_clean == svg_text_clean:
-            return {
-                'score': 1.0,
-                'match': svg_text,
-                'strategy': 'exact_match'
-            }
-        
-        # Strategy 2: Case-insensitive exact match
-        if shape_text_clean.lower() == svg_text_clean.lower():
-            if 0.98 > best_score:
-                best_match = svg_text
-                best_score = 0.98
-                best_strategy = 'case_insensitive_exact'
-        
-        # Strategy 3: Normalized whitespace match
-        shape_normalized = re.sub(r'\s+', ' ', shape_text_clean)
-        svg_normalized = re.sub(r'\s+', ' ', svg_text_clean)
-        if shape_normalized == svg_normalized:
-            if 0.95 > best_score:
-                best_match = svg_text
-                best_score = 0.95
-                best_strategy = 'normalized_whitespace'
-        
-        # Strategy 4: Substring matching
-        if shape_text_clean in svg_text_clean or svg_text_clean in shape_text_clean:
-            # Calculate overlap ratio
-            longer_text = shape_text_clean if len(shape_text_clean) > len(svg_text_clean) else svg_text_clean
-            shorter_text = svg_text_clean if len(shape_text_clean) > len(svg_text_clean) else shape_text_clean
-            
-            overlap_score = len(shorter_text) / len(longer_text) * 0.9  # Penalty for partial match
-            if overlap_score > best_score and overlap_score > 0.7:
-                best_match = svg_text
-                best_score = overlap_score
-                best_strategy = 'substring_match'
-        
-        # Strategy 5: Word-based similarity
-        shape_words = set(shape_text_clean.lower().split())
-        svg_words = set(svg_text_clean.lower().split())
-        
-        if shape_words and svg_words:
-            common_words = shape_words & svg_words
-            total_words = shape_words | svg_words
-            word_similarity = len(common_words) / len(total_words) * 0.85  # Penalty for word-based match
-            
-            if word_similarity > best_score and word_similarity > 0.6:
-                best_match = svg_text
-                best_score = word_similarity
-                best_strategy = 'word_similarity'
-        
-        # Strategy 6: Character-based similarity (Jaccard-like)
-        if len(shape_text_clean) > 5 and len(svg_text_clean) > 5:  # Only for longer texts
-            shape_chars = set(shape_text_clean.lower())
-            svg_chars = set(svg_text_clean.lower())
-            
-            common_chars = shape_chars & svg_chars
-            total_chars = shape_chars | svg_chars
-            
-            if total_chars:
-                char_similarity = len(common_chars) / len(total_chars) * 0.75  # Lower weight for char similarity
-                
-                if char_similarity > best_score and char_similarity > 0.5:
-                    best_match = svg_text
-                    best_score = char_similarity
-                    best_strategy = 'character_similarity'
-    
-    return {
-        'score': best_score,
-        'match': best_match,
-        'strategy': best_strategy
-    }
-
-
-def _apply_coordinate_validation(
-    shape: SlideShape,
-    match_result: Dict[str, Any],
-    transform_info: Dict[str, float]
-) -> SlideShape:
-    """Apply coordinate validation and transformation based on SVG match."""
-    svg_text = match_result['match']
-    
-    # Store original SVG coordinates
-    svg_original_x = svg_text['x']
-    svg_original_y = svg_text['y']
-    
-    # Apply coordinate transformation if needed
-    if transform_info['needs_transform']:
-        # Transform SVG coordinates back to slide coordinate space
-        adjusted_x = int((svg_original_x - transform_info['offset_x']) / transform_info['scale_x'])
-        adjusted_y = int((svg_original_y - transform_info['offset_y']) / transform_info['scale_y'])
-    else:
-        # Use SVG coordinates directly
-        adjusted_x = int(svg_original_x)
-        adjusted_y = int(svg_original_y)
-    
-    # Create updated shape with validated coordinates and metadata
-    shape_dict = shape.dict()
-    shape_dict.update({
-        'x_coordinate': adjusted_x,
-        'y_coordinate': adjusted_y,
-        'coordinate_validation_score': match_result['score'],
-        'svg_matched': True,
-        'svg_original_x': svg_original_x,
-        'svg_original_y': svg_original_y,
-        'coordinate_source': f"svg_validation ({match_result['strategy']})"
-    })
-    
-    return SlideShape(**shape_dict)
 
 
 def segment_text_for_translation(text: str, max_segment_length: int = 100) -> List[Dict[str, Any]]:

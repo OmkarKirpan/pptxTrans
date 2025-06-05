@@ -2,7 +2,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import os
 from dotenv import load_dotenv
-import logging # Added for manager logging
+import logging
+from python_json_logger import jsonlogger
 
 from app.api.routes import processing, status, health, metrics
 from app.core.config import Settings, get_settings
@@ -15,9 +16,33 @@ from app.services.pptx_processor import process_pptx # The actual function to pr
 # Load environment variables
 load_dotenv()
 
-# Configure basic logging if not already configured by uvicorn/gunicorn
-# This helps see logs from the manager during startup/shutdown if they happen early.
-logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper())
+# Configure structured JSON logging
+def setup_logging():
+    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+    logger = logging.getLogger()
+    logger.setLevel(log_level)
+    
+    # Remove existing handlers to avoid duplicate logs
+    if logger.hasHandlers():
+        logger.handlers.clear()
+        
+    logHandler = logging.StreamHandler()
+    
+    # format_str = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    # More detailed format string including timestamp, level, name, message, and any extra fields passed
+    format_str = '%(timestamp)s %(levelname)s %(name)s %(message)s'
+    formatter = jsonlogger.JsonFormatter(
+        format_str,
+        rename_fields={'asctime': 'timestamp', 'levelname': 'level', 'name': 'logger_name'},
+        datefmt="%Y-%m-%dT%H:%M:%S%z" # ISO 8601 format
+    )
+    
+    logHandler.setFormatter(formatter)
+    logger.addHandler(logHandler)
+
+# Set up logging before creating the logger instance
+setup_logging()
+
 logger = logging.getLogger(__name__)
 
 def create_application() -> FastAPI:

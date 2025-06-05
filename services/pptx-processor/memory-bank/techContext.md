@@ -3,90 +3,199 @@
 ## Technologies Used
 
 ### Core Framework
-- **FastAPI**: Modern, high-performance Python web framework.
+- **FastAPI**: Modern, high-performance Python web framework for the API layer.
 
-### PPTX Processing & SVG Generation
-- **LibreOffice (via `subprocess`)**: Primary method for high-fidelity PPTX to SVG conversion. Uses a single batch call (`--convert-to svg:"impress_svg_Export"`) for all slides.
-- **`python-pptx`**: For parsing PPTX files, extracting slide content, shapes, text, styles, and metadata.
-- **`xml.etree.ElementTree`**: For fallback SVG generation if LibreOffice is unavailable or fails.
-- **Pillow (PIL)**: For image processing, including creating thumbnails and handling embedded images.
+### Modular Architecture (Refactored)
+The service is now organized into three focused modules:
 
-### Backend and Storage
-- **Supabase**: For object storage (PPTX, SVGs, thumbnails) and potentially job status tracking (though currently local).
+#### 1. **Main Orchestrator (`pptx_processor.py`)**
+- **Purpose**: High-level workflow coordination and job management
+- **Dependencies**: Imports and coordinates between all other modules
+- **Features**: Cache management, status tracking, error coordination
 
-### Utilities
-- **`python-dotenv`**: For managing environment variables.
-- **`uv`**: For Python package management (replacing pip).
-- **`aiofiles`**: For asynchronous file operations (though current direct use is minimal).
+#### 2. **SVG Generation Module (`svg_generator.py`)**
+- **LibreOffice UNO API**: Primary method using UNO bridge to unoserver for individual slide processing
+- **LibreOffice Batch**: Fallback method using subprocess for batch conversion with `--convert-to svg:"impress_svg_Export"`
+- **Async Retry**: Exponential backoff retry mechanism for UNO API connections
+- **Validation**: LibreOffice availability checking and configuration validation
 
-## Current Technical Issues & Considerations
+#### 3. **Slide Parser Module (`slide_parser.py`)**
+- **`python-pptx`**: For parsing PPTX files, extracting slide content, shapes, text, styles, and metadata
+- **Table Processing**: Cell-by-cell extraction for granular translation support
+- **Coordinate Validation**: SVG text matching with fuzzy logic for accuracy verification
+- **Pillow (PIL)**: For thumbnail generation and image processing
 
-### 1. LibreOffice SVG Output Mapping
--   **Issue**: The `impress_svg_Export` filter's output file naming/numbering when converting a whole presentation needs to be robustly mapped to slide numbers. Current logic assumes sorted output matches slide order if file count is correct.
--   **Mitigation**: Logging is in place. Further testing across LibreOffice versions/OS is needed. If mapping fails, the system falls back to per-slide ElementTree generation.
+### Enhanced Dependencies
+- **`fuzzywuzzy`**: For advanced text matching and coordinate validation
+- **`python-json-logger`**: For structured JSON logging with contextual data
+- **Supabase**: For object storage (PPTX, SVGs, thumbnails) and database integration
+- **`python-dotenv`**: For managing environment variables
+- **`uv`**: For Python package management (replacing pip)
+- **`aiofiles`**: For asynchronous file operations
 
-### 2. Performance of Batch LibreOffice Conversion
--   **Consideration**: While more efficient than per-slide calls, a single batch call for very large presentations might be long-running or memory-intensive. Timeouts are implemented.
--   **Optimization**: Current approach is a significant improvement. Further parallelization of *independent* tasks (like thumbnail generation after SVGs are ready) could be explored if needed.
+## Current Technical Implementation
 
-### 3. Fallback SVG Fidelity
--   **Limitation**: The ElementTree-based SVG fallback (`create_svg_from_slide`) has inherent limitations in rendering complex PowerPoint features (e.g., intricate SmartArt, some chart types, complex gradients) with perfect visual fidelity compared to LibreOffice.
+### 1. Modular SVG Generation Strategy
+- **Primary Strategy**: UNO API individual slide processing with retry mechanisms
+  - Connects to unoserver via UNO bridge
+  - Processes each slide individually for maximum control
+  - Implements async retry decorator with exponential backoff
+  - Handles connection failures gracefully
+- **Fallback Strategy**: LibreOffice batch conversion for reliability
+  - Single batch call for all slides if UNO API fails
+  - Robust file mapping and timeout handling
+  - Comprehensive error detection and reporting
+
+### 2. Enhanced Text Extraction & Validation
+- **Shape Extraction**: Advanced shape processing with table cell granularity
+- **Coordinate Validation**: Complete SVG text matching pipeline
+  - Extracts text elements from generated SVG files
+  - Fuzzy text matching with confidence scoring
+  - Coordinate transformation and validation
+  - Validation status tracking (validated, partial, questionable, error)
+- **Translation Optimization**: Metadata structured for translation workflows
+
+### 3. Reliability Improvements
+- **Async Retry Mechanisms**: Handles transient UNO API connection failures
+- **Module Isolation**: Failures in one module don't cascade to others
+- **Comprehensive Error Handling**: Module-specific error strategies
+- **Structured Logging**: JSON logs with contextual data (job_id, session_id, etc.)
 
 ## Development Setup
 
 ### Environment Requirements
--   Python 3.10+
--   LibreOffice (optional but highly recommended for best SVG quality).
--   Supabase account and project (for storage).
+- Python 3.10+
+- LibreOffice (required for SVG generation)
+- unoserver (for UNO API functionality)
+- Supabase account and project (for storage)
 
-### Working Local Development Steps
-1.  Clone repository.
-2.  Create a Python virtual environment.
-3.  Install dependencies: `uv pip install -r requirements.txt`.
-4.  Set up a `.env` file based on `env.example` (configure Supabase, `LIBREOFFICE_PATH`, etc.).
-5.  Ensure LibreOffice is installed and `LIBREOFFICE_PATH` in `.env` points to the `soffice` executable if using this feature.
-6.  Run development server: `uvicorn main:app --reload` (or as per `pyproject.toml`).
+### Updated Development Steps
+1. Clone repository
+2. Create Python virtual environment
+3. Install dependencies: `uv pip install -r requirements.txt`
+4. Set up `.env` file based on `env.example`
+5. Configure LibreOffice path: `LIBREOFFICE_PATH=/usr/bin/soffice`
+6. Start unoserver: `unoserver --port 2002`
+7. Run development server: `uvicorn app.main:app --reload`
 
 ### Key Environment Variables (`.env`)
--   `SUPABASE_URL`, `SUPABASE_KEY`: For Supabase integration.
--   `LIBREOFFICE_PATH`: Optional path to `soffice` executable.
--   `LOG_LEVEL`: E.g., `INFO`, `DEBUG`.
--   `TEMP_DIR`: Base directory for temporary processing files (though `TEMP_UPLOAD_DIR`, `TEMP_PROCESSING_DIR` from `app.core.config` are more specific now).
+- `SUPABASE_URL`, `SUPABASE_KEY`: For Supabase integration
+- `LIBREOFFICE_PATH`: Path to `soffice` executable (required)
+- `LOG_LEVEL`: Logging level (e.g., `INFO`, `DEBUG`)
+- `TEMP_UPLOAD_DIR`, `TEMP_PROCESSING_DIR`: Temporary directories for processing
+
+### Dependencies Fixed
+- **Removed conflicting `uno` package**: Commented out to avoid pytest version conflicts
+- **Added `fuzzywuzzy`**: For advanced text matching capabilities
+- **Updated `python-json-logger`**: For structured logging support
 
 ## Technical Constraints & Decisions
 
-### SVG Generation Strategy: Hybrid, Optimized
--   **Primary**: Batch LibreOffice call for all slides for high visual fidelity and efficiency.
--   **Fallback**: `python-pptx` + ElementTree for guaranteed SVG output (lower fidelity for complex elements) if LibreOffice fails or is not configured.
--   **Rationale**: Balances visual quality, robustness, and performance.
+### Modular Architecture Benefits
+- **Separation of Concerns**: Each module has a clear, focused responsibility
+- **Maintainability**: Smaller files (200-500 lines) easier to understand and modify
+- **Testability**: Isolated modules enable comprehensive unit testing
+- **Extensibility**: New features can be added without affecting core logic
 
-### Metadata Extraction
--   Always performed using `python-pptx` (`extract_shapes`) once per slide, irrespective of the SVG generation method used for that slide's visual.
+### SVG Generation Strategy: Dual Approach
+- **Primary**: UNO API for maximum control and individual slide processing
+- **Fallback**: LibreOffice batch for reliability when UNO API fails
+- **Rationale**: Balances control, visual quality, and robustness
+
+### Enhanced Metadata Extraction
+- **Cell-Level Table Processing**: Each table cell treated as independent translatable unit
+- **Coordinate Validation**: SVG text matching ensures frontend overlay accuracy
+- **Fuzzy Matching**: Handles slight text variations between extraction and SVG output
 
 ### Asynchronous Operations
--   FastAPI's `BackgroundTasks` are used for the main `process_pptx` task, keeping the API responsive.
+- **FastAPI BackgroundTasks**: For main processing workflow
+- **Async Retry Decorator**: For UNO API connection reliability
+- **Proper Resource Management**: Async context managers for cleanup
 
-### Configuration
--   Key operational parameters (LibreOffice path, Supabase details) are managed via `app.core.config.Settings` loading from `.env`.
+### Configuration Management
+- **Environment-Driven**: All configuration via environment variables
+- **Module-Specific Settings**: Each module accesses relevant configuration
+- **Docker-Ready**: Configuration optimized for containerized deployment
 
-## Implemented Technical Stack Summary
+## Module-Specific Implementation
 
--   **API**: FastAPI
--   **PPTX Parsing & Metadata**: `python-pptx`
--   **Primary SVG Rendering**: LibreOffice (`soffice` via `subprocess`)
--   **Fallback SVG Rendering**: `xml.etree.ElementTree`
--   **Image Handling/Thumbnails**: Pillow
--   **Package Management**: `uv`
--   **Configuration**: `python-dotenv`, Pydantic `BaseSettings`
--   **Storage**: Supabase (via `supabase-py` client library)
+### SVG Generator Module Functions
+1. `generate_svgs()` - Main entry point with dual strategy
+2. `generate_svgs_via_uno_api()` - UNO API implementation with retry
+3. `generate_svgs_via_libreoffice_batch()` - Batch conversion fallback
+4. `validate_libreoffice_availability()` - System validation
+5. `_get_uno_context_with_retry()` - Connection management with retry
 
-## Dependencies (Key Libraries)
--   `fastapi`
--   `uvicorn`
--   `python-pptx`
--   `Pillow`
--   `pydantic`
--   `pydantic-settings`
--   `python-dotenv`
--   `supabase`
--   Standard libraries: `os`, `shutil`, `subprocess`, `glob`, `json`, `xml.etree.ElementTree`, `logging`, `asyncio`, `tempfile`. 
+### Slide Parser Module Functions
+1. `extract_shapes_enhanced()` - Shape and table extraction
+2. `validate_coordinates_with_svg()` - Complete coordinate validation
+3. `create_thumbnail_from_slide_enhanced()` - Thumbnail generation
+4. `_extract_svg_dimensions()` - SVG viewport analysis
+5. `_calculate_coordinate_transform()` - Coordinate transformation
+6. `_extract_svg_text_elements()` - SVG text element extraction
+7. `_find_best_svg_text_match()` - Fuzzy text matching
+8. `_apply_coordinate_validation()` - Validation application
+
+## Dependencies (Updated Libraries)
+
+### Core Dependencies
+- `fastapi>=0.103.1`
+- `uvicorn>=0.23.2`
+- `python-multipart>=0.0.6`
+- `pydantic>=2.4.2`
+- `pydantic-settings>=2.0.3`
+
+### Processing Dependencies
+- `python-pptx>=0.6.21` - PPTX parsing and metadata extraction
+- `pillow>=10.0.0` - Image processing and thumbnails
+- `fuzzywuzzy` - Text matching for coordinate validation
+
+### Integration Dependencies
+- `supabase>=1.0.3` - Storage and database integration
+- `storage3>=0.5.4` - Supabase storage client
+- `python-json-logger` - Structured logging
+
+### Utility Dependencies
+- `python-dotenv>=1.0.0` - Environment variable management
+- `aiofiles>=23.2.1` - Async file operations
+
+### Development Dependencies
+- `pytest>=7.4.2` - Testing framework
+- `httpx>=0.25.0` - HTTP client for testing
+- `ruff` - Linting and formatting
+
+## Production Readiness Features
+
+### Enhanced Error Handling
+- **Module-Specific Strategies**: Each module handles its domain-specific errors
+- **Retry Mechanisms**: Async retry for transient failures
+- **Comprehensive Logging**: Structured JSON logs with rich context
+- **Graceful Degradation**: Fallback strategies maintain functionality
+
+### Performance Optimizations
+- **Modular Processing**: Parallel opportunities between independent modules
+- **Efficient Resource Usage**: Proper cleanup and resource management
+- **Caching Support**: Framework for result caching and reuse
+- **Timeout Management**: Configurable timeouts for long-running operations
+
+### Monitoring & Observability
+- **Structured Logging**: JSON format with contextual data
+- **Status Tracking**: Comprehensive job status management
+- **Health Checks**: Module-specific health validation
+- **Performance Metrics**: Processing time tracking and optimization
+
+## Docker Integration
+
+### Container Optimization
+- **LibreOffice Pre-installed**: Container includes properly configured LibreOffice
+- **UNO Server Support**: Ready for UNO API operations
+- **Environment Configuration**: All settings via environment variables
+- **Health Checks**: Validates LibreOffice and UNO server availability
+
+### Development Workflow
+- **Docker Compose**: Easy development setup
+- **Volume Mounts**: Proper development file handling
+- **Hot Reload**: Development server with auto-reload
+- **Debugging Support**: Container debugging capabilities
+
+The modular technical architecture provides a robust foundation for maintainable, scalable, and reliable PPTX processing capabilities. 

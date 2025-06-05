@@ -20,4 +20,16 @@ aiofiles>=23.2.1
 
 # Testing
 pytest>=7.4.2
-httpx>=0.25.0 
+httpx>=0.25.0
+
+# For structured logging
+python-json-logger
+
+# For fuzzy string matching in slide parser
+fuzzywuzzy
+
+# For LibreOffice UNO Bridge (installed with LibreOffice)
+# uno
+
+# Linter/Formatter
+ruff 
