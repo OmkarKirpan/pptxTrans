@@ -36,6 +36,14 @@ export interface SlideShape {
   has_comments: boolean
   created_at: string
   updated_at: string
+  // Auto-translation properties
+  is_auto_translated?: boolean // Flag indicating if the text was automatically translated
+  translated_metadata?: {
+    is_auto_translated?: boolean,
+    translation_source?: string,
+    confidence_score?: number,
+    translation_date?: string
+  } // Additional metadata about the translation
   // UI state flags - not persisted to database
   _pendingUpdate?: boolean // Flag for optimistic updates
   _localChanges?: boolean // Flag for changes made locally but not yet synchronized

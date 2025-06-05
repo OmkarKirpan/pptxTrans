@@ -2,6 +2,7 @@ import { SupabaseClient } from '@supabase/supabase-js';
 import { ShareRecord, CreateShareData, SharePermission } from '../models/share';
 
 const SESSION_SHARES_TABLE = 'session_shares';
+const APP_BASE_URL = process.env.APP_BASE_URL || 'http://localhost:3000'; // For constructing share URLs
 
 /**
  * Creates a new share record in the database.
@@ -22,6 +23,7 @@ export async function createShare(
       expires_at: shareData.expires_at.toISOString(),
       created_by: shareData.created_by,
       name: shareData.name,
+      share_url: shareData.share_url, // Store the share URL in the database
     })
     .select()
     .single();
@@ -60,7 +62,18 @@ export async function listSharesBySessionId(
     console.error('Error listing shares by session ID:', error);
     throw new Error(`Failed to list shares: ${error.message}`);
   }
-  return (data as ShareRecord[]) || [];
+  
+  // If share_url is not in the database for older records, construct it here
+  const sharesWithUrl = (data as ShareRecord[] || []).map(share => {
+    if (!share.share_url && share.share_token_jti) {
+      // We don't have the actual token here, just the JTI, so this is a best-effort approach
+      // For older records without share_url, the frontend will handle this case
+      return share;
+    }
+    return share;
+  });
+  
+  return sharesWithUrl;
 }
 
 /**

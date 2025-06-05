@@ -57,6 +57,7 @@ export interface ShareRecord {
   created_at: string; // ISO 8601 timestamp string
   revoked_at?: string | null; // ISO 8601 timestamp string, if revoked
   name?: string | null; // Optional user-friendly name for the share link
+  share_url?: string | null; // The full shareable URL containing the token
 }
 
 /**
@@ -69,6 +70,7 @@ export interface CreateShareData {
   expires_at: Date; // Use Date object for easier manipulation before DB insertion
   created_by: string;
   name?: string;
+  share_url?: string; // The full shareable URL to be stored
 }
 
 /**

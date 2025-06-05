@@ -9,7 +9,7 @@ import SlideCanvas from "@/components/editor/slide-canvas"
 import CommentsPanel from "@/components/editor/comments-panel"
 import { createClient } from "@/lib/supabase/client"
 import type { ProcessedSlide } from "@/types" // Corrected import
-import { Loader2, AlertTriangle } from "lucide-react"
+import { Loader2, AlertTriangle, Eye, MessageSquare, MessageSquareOff, Lock } from "lucide-react"
 import type { User } from "@supabase/supabase-js"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -19,9 +19,11 @@ import { useAuditLog } from "@/hooks/useAuditLog" // Import audit log hook
 import { SyncStatusIndicator } from "@/components/editor/sync-status-indicator"
 import { useRealTimeSync } from "@/lib/services/realtime-sync"
 import { updateLastOpenedAt } from "@/lib/api/translationSessionApi" // Import the API function
+import { Badge } from "@/components/ui/badge"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 // Import Zustand hooks
-import { useSlides, useEditBuffers, useTranslationSessions } from "@/lib/store"
+import { useSlides, useEditBuffers, useTranslationSessions, useSession } from "@/lib/store"
 
 // MOCK DATA using ProcessedSlide and new SlideShape structure - REMOVE THIS
 // const MOCK_PROCESSED_SLIDES: ProcessedSlide[] = [ ... ];
@@ -29,12 +31,17 @@ import { useSlides, useEditBuffers, useTranslationSessions } from "@/lib/store"
 export default function SlideEditorPage() {
   const params = useParams()
   const router = useRouter()
-  // const supabase = createClient() // Keep if needed for other things, otherwise remove if all data via store
   const { subscribeToSession, unsubscribeFromSession } = useRealTimeSync()
 
   const sessionId = params.sessionId as string
   
   const { createAuditEvent } = useAuditLog(sessionId)
+
+  // Get user role and share token information
+  const { userRole, shareToken } = useSession()
+  const isSharedAccess = !!shareToken
+  const canEdit = userRole === 'owner' // Only owners can edit (for now)
+  const canComment = userRole === 'owner' || userRole === 'reviewer' // Owners and reviewers can comment
 
   // Use TranslationSessions store for session metadata
   const { 
@@ -51,26 +58,20 @@ export default function SlideEditorPage() {
   const {
     slides,
     currentSlideId,
-    // currentSlide, // This can be derived: slides.find(s => s.id === currentSlideId)
-    // setSlides, // Data now set by fetchSlidesForSession
     setCurrentSlide,
-    // updateSlideShapes, // Keep if used directly, or ensure it's part of other flows
-    slidesLoading, // Use this for loading state
-    // setSlidesLoading, // No longer set directly here
-    slidesError, // Use this for error state
-    // setSlidesError, // No longer set directly here
+    slidesLoading,
+    slidesError,
     updateShape,
-    fetchSlidesForSession // New action
+    fetchSlidesForSession
   } = useSlides()
   
   const {
     activeBufferId,
-    // activeBuffer, // This can be derived
     createBuffer,
     updateBuffer,
-    saveBuffer, // Ensure this calls updateShape from useSlides
+    saveBuffer,
     setActiveBuffer,
-    activeBuffer // Add activeBuffer here, it's computed in the hook
+    activeBuffer
   } = useEditBuffers()
 
   const [user, setUser] = useState<User | null>(null) // Keep for user auth state
@@ -80,40 +81,43 @@ export default function SlideEditorPage() {
 
   useEffect(() => {
     const fetchData = async () => {
-      // Loading states are now managed within their respective slices
-      
-      const supabase = createClient(); // Create client locally for auth check
-      const {
-        data: { user: authUser },
-        error: authError,
-      } = await supabase.auth.getUser()
+      // For shared access, we don't need to check user authentication
+      if (!isSharedAccess) {
+        const supabase = createClient(); // Create client locally for auth check
+        const {
+          data: { user: authUser },
+          error: authError,
+        } = await supabase.auth.getUser()
 
-      if (authError || !authUser) {
-        router.push("/auth/login")
-        return
+        if (authError || !authUser) {
+          router.push("/auth/login")
+          return
+        }
+        setUser(authUser)
       }
-      setUser(authUser)
 
       try {
-        await updateLastOpenedAt(sessionId)
-        createAuditEvent('view', { action: 'session_opened', sessionId });
+        // Only update last opened for owner (not for shared access)
+        if (!isSharedAccess) {
+          await updateLastOpenedAt(sessionId)
+          createAuditEvent('view', { action: 'session_opened', sessionId });
+        } else {
+          createAuditEvent('view', { 
+            action: 'session_opened_via_share', 
+            sessionId,
+            userRole,
+            shareAccess: true 
+          });
+        }
         
         // Fetch session details first
         await fetchSessionDetails(sessionId)
-        
-        // Access the just-fetched session details from the store to check status
-        // Need to use get() from the store instance or re-fetch/rely on the hook updating.
-        // For simplicity in a component, we can use a temporary variable if fetchSessionDetails returns the session.
-        // However, fetchSessionDetails in the slice returns void. So we rely on the hook to update.
-        // This means we might need another useEffect to react to currentSessionDetails changes for status update.
         
         // Fetch slides and shapes from Slides store
         await fetchSlidesForSession(sessionId)
 
       } catch (error: any) {
         console.error("Error fetching session or slide data:", error)
-        // Errors are now handled within the respective stores (translationSessionError, slidesError)
-        // No need to set a general error here, but can log or show a generic message if needed.
       }
     }
 
@@ -125,10 +129,8 @@ export default function SlideEditorPage() {
     return () => {
       unsubscribeFromSession(sessionId)
       clearCurrentSessionDetails() // Clear session details from store
-      // Optionally clear slides from slides store if desired:
-      // get().setSlides([]) // Assuming a clearSlides action exists or use setSlides([])
     }
-  }, [sessionId, router, fetchSessionDetails, fetchSlidesForSession, createAuditEvent, unsubscribeFromSession, clearCurrentSessionDetails])
+  }, [sessionId, router, fetchSessionDetails, fetchSlidesForSession, createAuditEvent, unsubscribeFromSession, clearCurrentSessionDetails, isSharedAccess, userRole])
 
   // Effect for real-time subscription & status transition
   useEffect(() => {
@@ -136,14 +138,14 @@ export default function SlideEditorPage() {
       subscribeToSession(sessionId)
       createAuditEvent('view', { action: 'realtime_subscription_started', sessionId });
 
-      // Automatically transition status from draft to in_progress
-      if (currentSessionDetails.status === 'draft') {
+      // Automatically transition status from draft to in_progress (only for owner, not shared access)
+      if (currentSessionDetails.status === 'draft' && !isSharedAccess && canEdit) {
         markSessionInProgress(sessionId);
         createAuditEvent('edit', { action: 'session_status_updated', sessionId, newStatus: 'in_progress' });
       }
     }
     // No explicit return for unsubscribe here, as it's handled in the main fetchData useEffect's cleanup
-  }, [sessionId, currentSessionDetails, slides, slidesLoading, isSessionDetailsLoading, subscribeToSession, createAuditEvent, markSessionInProgress])
+  }, [sessionId, currentSessionDetails, slides, slidesLoading, isSessionDetailsLoading, subscribeToSession, createAuditEvent, markSessionInProgress, isSharedAccess, canEdit])
 
 
   // Loading state: Check both session details and slides loading
@@ -175,7 +177,7 @@ export default function SlideEditorPage() {
     )
   }
 
-  if (!currentSessionDetails || !user) { // Check currentSessionDetails from store
+  if (!currentSessionDetails) { 
     return (
       <div className="flex h-screen flex-col items-center justify-center">
         <Loader2 className="h-16 w-16 animate-spin text-primary" />
@@ -201,39 +203,38 @@ export default function SlideEditorPage() {
 
 
   // Ensure currentSlideId is valid, default to first slide if not
-  // This logic might be better placed in the slice or a selector
   let activeSlideId = currentSlideId
   if (!activeSlideId && slides.length > 0) {
     activeSlideId = slides[0].id
-    // setCurrentSlide(slides[0].id); // Avoid calling set state during render if possible
   }
   const slideToDisplay = slides.find(s => s.id === activeSlideId) || slides[0];
 
 
-  // const handleSaveTranslation = async () => { // Original structure
-  // Modified to integrate with useEditBuffers and useSlides more cleanly
   const handleSaveTranslation = async () => {
-    if (activeBufferId && activeBuffer && activeBuffer.isDirty && saveBuffer) { // Use activeBuffer from hook
+    if (!canEdit) {
+      // Show permission error toast or dialog
+      console.error("You don't have permission to edit this session");
+      return;
+    }
+
+    if (activeBufferId && activeBuffer && activeBuffer.isDirty && saveBuffer) {
       try {
-        // The saveBuffer action in edit-buffers-slice now handles calling updateShape
         await saveBuffer(activeBufferId) 
         
         createAuditEvent('edit', { 
           action: 'text_translated', 
-          slideId: activeBuffer.slideId, // Use activeBuffer from hook
-          shapeId: activeBuffer.shapeId, // Use activeBuffer from hook
+          slideId: activeBuffer.slideId,
+          shapeId: activeBuffer.shapeId,
         });
 
       } catch (error) {
         console.error("Error saving translation:", error)
-        // Handle error (e.g., show toast)
       }
-      setActiveBuffer(null) // Close dialog / clear active buffer
+      setActiveBuffer(null)
     }
   }
 
   // Ensure currentSlideId exists and is valid, if not, select the first slide
-  // This logic could also be part of a selector or inside the useEffect that fetches slides
   useEffect(() => {
     if (slides.length > 0 && !slides.find(s => s.id === currentSlideId)) {
       setCurrentSlide(slides[0].id);
@@ -242,6 +243,12 @@ export default function SlideEditorPage() {
 
   // Re-implement handleExport
   const handleExport = async () => {
+    if (!canEdit) {
+      // Show permission error toast or dialog
+      console.error("You don't have permission to export this session");
+      return;
+    }
+
     if (!currentSessionDetails) return;
     try {
       // Placeholder for actual export logic
@@ -255,7 +262,6 @@ export default function SlideEditorPage() {
       });
     } catch (error) {
       console.error("Export failed:", error);
-      // Handle error (e.g., show toast)
     }
   };
 
@@ -268,34 +274,43 @@ export default function SlideEditorPage() {
   ) => {
     if (!currentSlide) return;
 
-    createBuffer(shapeId, currentSlide.id, originalText, currentTranslation);
-    // setActiveBuffer(shapeId); // createBuffer now sets activeBufferId
+    // If user can't edit, just show a read-only view of the text
+    if (!canEdit) {
+      // Show a message or toast that the user doesn't have edit permissions
+      console.log("View-only access: Cannot edit translations");
+      // Could show a read-only dialog here instead
+      return;
+    }
 
-    createAuditEvent('view', { // Changed from 'edit' to 'view' as it's opening an editor
+    createBuffer(shapeId, currentSlide.id, originalText, currentTranslation);
+
+    createAuditEvent('view', {
       action: 'text_editor_opened',
       slideId: currentSlide.id,
       slideNumber: currentSlide.slide_number,
       shapeId,
-      shapeDetails: shapeData, // Pass along for more context if available
+      shapeDetails: shapeData,
     });
   };
 
   // Re-implement handleCloseDialog
   const handleCloseDialog = () => {
     if (activeBufferId) {
-      // Decide if buffer should be discarded or just dialog closed
-      // For now, just closing the dialog by clearing activeBufferId
-      // If discard is needed: discardBuffer(activeBufferId);
       setActiveBuffer(null);
     }
   };
 
   const handleMarkComplete = async () => {
+    if (!canEdit) {
+      // Show permission error toast or dialog
+      console.error("You don't have permission to mark this session as complete");
+      return;
+    }
+
     if (currentSessionDetails && currentSessionDetails.status === 'in_progress') {
       await markSessionCompleted(currentSessionDetails.id);
       createAuditEvent('edit', { action: 'session_status_updated', sessionId: currentSessionDetails.id, newStatus: 'completed' });
-      // Optionally, navigate away or show a success message
-      router.push('/dashboard'); // Navigate to dashboard after completion
+      router.push('/dashboard');
     }
   };
 
@@ -306,13 +321,59 @@ export default function SlideEditorPage() {
         user={user}
       >
         <div className="flex items-center gap-2">
+          {isSharedAccess && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center mr-2">
+                    <Badge variant="outline" className="flex items-center gap-1 px-2 py-1">
+                      {userRole === 'viewer' ? (
+                        <>
+                          <Eye className="h-3 w-3" />
+                          <span>View Only</span>
+                        </>
+                      ) : userRole === 'reviewer' ? (
+                        <>
+                          <MessageSquare className="h-3 w-3" />
+                          <span>Reviewer</span>
+                        </>
+                      ) : (
+                        <>
+                          <Lock className="h-3 w-3" />
+                          <span>{userRole}</span>
+                        </>
+                      )}
+                    </Badge>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {userRole === 'viewer' ? (
+                    <p>You have view-only access to this session</p>
+                  ) : userRole === 'reviewer' ? (
+                    <p>You can view and add comments to this session</p>
+                  ) : (
+                    <p>You are the {userRole} of this session</p>
+                  )}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
           <SyncStatusIndicator />
-          {currentSessionDetails && currentSessionDetails.status === 'in_progress' && (
+          {currentSessionDetails && currentSessionDetails.status === 'in_progress' && canEdit && (
             <Button onClick={handleMarkComplete} size="sm" variant="outline">
               Mark as Complete
             </Button>
           )}
-          <Button onClick={handleExport} disabled={slidesLoading || isSessionDetailsLoading || currentSessionDetails?.status !== 'completed'} size="sm">
+          <Button 
+            onClick={handleExport} 
+            disabled={
+              slidesLoading || 
+              isSessionDetailsLoading || 
+              currentSessionDetails?.status !== 'completed' ||
+              !canEdit
+            } 
+            size="sm"
+          >
             Export PPTX
           </Button>
         </div>
@@ -335,13 +396,21 @@ export default function SlideEditorPage() {
           <SlideCanvas
             slide={slideToDisplay}
             onTextClick={handleTextClick}
-            editable={true}
+            editable={canEdit}
             showReadingOrder={false}
           />
         </div>
 
         {/* Right sidebar - Comments Panel */}
-        <div className="w-80 flex-none overflow-y-auto border-l bg-muted/30 p-4">
+        <div className={`w-80 flex-none overflow-y-auto border-l bg-muted/30 p-4 ${canComment ? '' : 'relative'}`}>
+          {!canComment && (
+            <div className="absolute inset-0 bg-background/80 flex flex-col items-center justify-center z-10">
+              <MessageSquareOff className="h-12 w-12 text-muted-foreground mb-2" />
+              <p className="text-sm text-muted-foreground text-center px-4">
+                Comments are not available with your current permissions
+              </p>
+            </div>
+          )}
           <CommentsPanel />
         </div>
       </div>
@@ -374,7 +443,7 @@ export default function SlideEditorPage() {
             <DialogClose asChild>
               <Button variant="outline" onClick={handleCloseDialog}>Cancel</Button>
             </DialogClose>
-            <Button onClick={handleSaveTranslation} disabled={!activeBuffer?.isDirty}>
+            <Button onClick={handleSaveTranslation} disabled={!activeBuffer?.isDirty || !canEdit}>
               Save Translation
             </Button>
           </DialogFooter>

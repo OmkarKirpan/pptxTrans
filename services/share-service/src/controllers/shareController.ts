@@ -83,13 +83,14 @@ export const createShareHandler = factory.createHandlers(
       expires_at: new Date(decodedToken.exp * 1000), // exp is in seconds
       created_by: authenticatedUserId,
       name,
+      share_url: `${APP_BASE_URL}/shared/${shareTokenString}`, // Store full share URL
     };
 
     // 4. Save share record to DB
     const createdRecord = await createShare(supabase, shareData);
 
     // 5. Construct share URL and respond
-    const shareUrl = `${APP_BASE_URL}/shared?token=${shareTokenString}`;
+    const shareUrl = createdRecord.share_url || `${APP_BASE_URL}/shared/${shareTokenString}`;
     
     const response: CreatedShareInfo = {
         id: createdRecord.id,
