@@ -230,3 +230,28 @@ class ErrorResponse(BaseModel):
     message: str = Field(..., description="Error message")
     details: Optional[Dict[str, Any]] = Field(
         None, description="Additional error details")
+
+# New Models for Metrics Endpoint
+
+class WorkerPoolMetrics(BaseModel):
+    max_workers: int
+    current_busy_slots: int
+    available_slots: int
+    total_tasks_acquired: int
+    total_tasks_released: int
+
+class ProcessingManagerMetrics(BaseModel):
+    jobs_submitted: int
+    jobs_succeeded: int
+    jobs_failed: int
+    current_queue_size: int
+    is_running: bool
+    worker_pool_metrics: WorkerPoolMetrics
+
+class ServiceMetricsResponse(BaseModel):
+    """Response model for the service metrics endpoint."""
+    service_name: str = Field(default="PPTX Processor Service")
+    version: str
+    uptime_seconds: float
+    processing_manager: ProcessingManagerMetrics
+    # Potentially add other system metrics later (CPU, memory, etc.)

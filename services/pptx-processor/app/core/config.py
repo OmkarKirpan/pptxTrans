@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     # Storage - Using relative paths for Windows compatibility
     TEMP_UPLOAD_DIR: str = os.path.join(".", "tmp", "uploads")
     TEMP_PROCESSING_DIR: str = os.path.join(".", "tmp", "processing")
+    CACHE_DIR: str = os.path.join(".", "tmp", "cache")
 
     # Supabase - REQUIRED for the service to function
     SUPABASE_URL: str = Field(
@@ -66,6 +67,7 @@ class Settings(BaseSettings):
     SVG_QUALITY: int = 90
     GENERATE_THUMBNAILS: bool = True
     THUMBNAIL_WIDTH: int = 250
+    MAX_CONCURRENT_JOBS: int = Field(default=3, ge=1, description="Maximum number of PPTX files to process concurrently")
 
     TEMP_DIR: str = "/tmp/pptx_processor"  # Example default
     LIBREOFFICE_PATH: Optional[str] = None

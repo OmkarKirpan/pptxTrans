@@ -31,10 +31,12 @@ from app.models.schemas import (
     ProcessingStatusResponse,
     ProcessingStatus
 )
-from app.services.supabase_service import upload_file_to_supabase, update_job_status
+from app.services.supabase_service import upload_file_to_supabase, update_job_status as update_supabase_job_status
 from app.services.job_status import update_job_status as update_local_job_status, get_job_status
-# Import get_settings instead of settings
 from app.core.config import get_settings
+# Import the new ProcessingManager related functions
+from app.services.processing_manager import get_processing_manager
+from app.services.cache_service import get_cache_service # Import CacheService
 
 logger = logging.getLogger(__name__)
 
@@ -178,32 +180,58 @@ async def queue_pptx_processing(
     generate_thumbnails: bool = True
 ) -> None:
     """
-    Queue the PPTX processing task.
+    Queue the PPTX processing task using the ProcessingManager.
     """
-    # Store the file path for potential retry
     _job_file_paths[job_id] = file_path
 
+    # Initial status update to QUEUED, as the manager will pick it up.
+    # The manager loop, when it picks a job, can update it to PROCESSING.
+    # Or, process_pptx itself can update it to PROCESSING as its first step.
+    # For now, let's set it to QUEUED reflecting it's in our system's queue.
     await update_local_job_status(
         job_id=job_id,
         status=ProcessingStatusResponse(
             job_id=job_id,
             session_id=session_id,
-            status=ProcessingStatus.PROCESSING,
+            status=ProcessingStatus.QUEUED, # Changed from PROCESSING to QUEUED
             progress=0,
-            current_stage="Starting processing"
+            current_stage="Job queued for processing"
         )
     )
-    loop = asyncio.get_event_loop()
-    loop.create_task(
-        process_pptx(
+
+    job_details = {
+        'job_id': job_id,
+        'session_id': session_id,
+        'file_path': file_path,
+        'source_language': source_language,
+        'target_language': target_language,
+        'generate_thumbnails': generate_thumbnails
+    }
+
+    try:
+        manager = get_processing_manager()
+        await manager.submit_job(job_details)
+        logger.info(f"Job {job_id} successfully submitted to ProcessingManager.")
+    except Exception as e:
+        logger.error(f"Failed to submit job {job_id} to ProcessingManager: {e}", exc_info=True)
+        # Update status to FAILED if submission itself fails
+        await update_local_job_status(
             job_id=job_id,
-            session_id=session_id,
-            file_path=file_path,
-            source_language=source_language,
-            target_language=target_language,
-            generate_thumbnails=generate_thumbnails
+            status=ProcessingStatusResponse(
+                job_id=job_id,
+                session_id=session_id,
+                status=ProcessingStatus.FAILED,
+                progress=0,
+                current_stage="Failed to queue job",
+                error=f"Failed to submit to manager: {str(e)}"
+            )
         )
-    )
+        # Also update Supabase status if needed
+        await update_supabase_job_status(
+            session_id=session_id, status="failed", error=f"Failed to queue job: {str(e)}"
+        )
+        # Re-raise or handle as appropriate for the caller
+        raise
 
 
 async def process_pptx(
@@ -216,9 +244,80 @@ async def process_pptx(
 ) -> None:
     """
     Process a PPTX file using LibreOffice-only approach.
-    No fallbacks - if LibreOffice fails, processing fails.
+    Checks cache first, then processes if not found, and stores to cache on success.
     """
     start_time = time.time()
+    cache_service = get_cache_service()
+    cache_params = {
+        "source_language": source_language or "", # Ensure consistent type for key
+        "target_language": target_language or "",
+        "generate_thumbnails": generate_thumbnails
+    }
+    cache_key = cache_service.generate_cache_key(file_path, cache_params)
+
+    if cache_key:
+        cached_result_tuple = cache_service.get_cached_result(cache_key)
+        if cached_result_tuple:
+            cached_presentation, cached_result_url = cached_result_tuple
+            logger.info(f"Cache hit for job {job_id} (session {session_id}) with key {cache_key}.")
+            
+            # Update local status to COMPLETED
+            await update_local_job_status(
+                job_id=job_id,
+                status=ProcessingStatusResponse(
+                    job_id=job_id, session_id=session_id, status=ProcessingStatus.COMPLETED,
+                    progress=100, current_stage="Processing completed (from cache)",
+                    completed_at=datetime.now() # Or use a cached completion time if stored
+                )
+            )
+            # Update Supabase status
+            await update_supabase_job_status(
+                session_id=session_id,
+                status="completed",
+                slide_count=cached_presentation.slide_count,
+                result_url=cached_result_url # This is the URL to the main result.json
+            )
+            # Potentially update _job_file_paths if needed for retries, though cache hit means no retry of processing.
+            # For now, we assume original file path might still be relevant for other operations.
+            if job_id not in _job_file_paths:
+                 _job_file_paths[job_id] = file_path
+
+            # Clean up the uploaded file since processing is "done" via cache
+            # Ensure this cleanup logic is consistent with the non-cached path's finally block
+            uploaded_file_dir_for_cleanup = os.path.dirname(file_path)
+            try:
+                if os.path.exists(uploaded_file_dir_for_cleanup):
+                    # Ensure no processing_output dir is accidentally deleted if it wasn't created
+                    # For cache hit, processing_output_dir is not created by this run.
+                    # We only want to clean up the original uploaded file and its parent if empty.
+                    if os.path.isfile(file_path): # Check if it's a file before deleting its dir
+                         os.remove(file_path)
+                         logger.info(f"Cleaned up source file (cache hit): {file_path}")
+                         # Attempt to remove the directory if it's empty
+                         try:
+                             os.rmdir(uploaded_file_dir_for_cleanup)
+                             logger.info(f"Cleaned up empty source directory (cache hit): {uploaded_file_dir_for_cleanup}")
+                         except OSError:
+                             logger.debug(f"Source directory not empty, not removed (cache hit): {uploaded_file_dir_for_cleanup}")
+
+
+                    if job_id in _job_file_paths: # Remove from cache after cleanup
+                        del _job_file_paths[job_id]
+
+            except Exception as e_cleanup:
+                logger.error(f"Error cleaning up source file on cache hit {file_path}: {str(e_cleanup)}")
+            return # End processing here due to cache hit
+
+    logger.info(f"Cache miss for job {job_id} (session {session_id}). Proceeding with full processing.")
+    # Update local status to PROCESSING (if not already updated by manager)
+    await update_local_job_status(
+        job_id=job_id,
+        status=ProcessingStatusResponse(
+            job_id=job_id, session_id=session_id, status=ProcessingStatus.PROCESSING,
+            progress=1, current_stage="Starting full processing"
+        )
+    )
+
     # processing_dir is the main directory for this job's outputs (SVGs, JSON)
     uploaded_file_dir = os.path.dirname(file_path)
     processing_output_dir = os.path.join(uploaded_file_dir, "processing_output")
@@ -305,13 +404,18 @@ async def process_pptx(
 
         result_file = os.path.join(processing_output_dir, f"result_{session_id}.json")
         with open(result_file, "w") as f:
-            json.dump(result.dict(), f, indent=4)
+            json.dump(result.model_dump(mode='json'), f, indent=4)
 
         result_url = await upload_file_to_supabase(
             file_path=result_file,
             bucket="processing-results", 
             destination_path=f"{session_id}/result.json"
         )
+
+        # Store successful result in cache
+        if cache_key and result_url: # result_url must exist to be a valid cache entry
+            cache_service.store_cached_result(cache_key, result, result_url)
+            logger.info(f"Processing result for job {job_id} stored in cache with key {cache_key}.")
 
         await update_local_job_status(
             job_id=job_id,
@@ -321,7 +425,7 @@ async def process_pptx(
             )
         )
         
-        await update_job_status(
+        await update_supabase_job_status(
             session_id=session_id, 
             status="completed",
             slide_count=slide_count, 
@@ -329,33 +433,69 @@ async def process_pptx(
         )
 
     except Exception as e:
-        logger.error(f"Error processing PPTX: {str(e)}", exc_info=True)
+        logger.error(f"Error processing PPTX for job {job_id}: {str(e)}", exc_info=True)
         await update_local_job_status(
             job_id=job_id,
             status=ProcessingStatusResponse(
                 job_id=job_id, session_id=session_id, status=ProcessingStatus.FAILED,
-                progress=0, current_stage="Processing failed", error=str(e)
+                progress=0, current_stage="Processing failed", error=str(e) # Ensure progress is reset on failure
             )
         )
-        await update_job_status(
+        await update_supabase_job_status(
             session_id=session_id, status="failed", error=str(e)
         )
-        raise  # Re-raise to ensure proper error propagation
+        # Do not re-raise here if called by ProcessingManager, as it handles logging.
+        # If this function can be called directly, re-raising might be desired.
+        # For now, assuming ProcessingManager's _execute_job handles the top-level try/except.
+        # However, if this function is intended to be a standalone callable that signals failure by raising,
+        # then `raise` should be here. Given it's called by the manager, which logs, let's not re-raise.
+        # Update: The manager calls this and logs, but the original function re-raised.
+        # For consistency with how it was called by asyncio.create_task before, let's re-raise.
+        raise
         
     finally:
-        # Clean up temporary files
+        # Clean up temporary files from processing_output_dir and the uploaded file
         try:
-            if os.path.exists(uploaded_file_dir):
-                status = await get_job_status(job_id)
-                if status and status.status not in ["queued", "processing"]:
-                    shutil.rmtree(uploaded_file_dir)
-                    logger.info(f"Cleaned up temporary processing directory: {uploaded_file_dir}")
+            # This status check is to avoid deleting files if the job is still queued or actively processing
+            # (e.g. if cleanup is called prematurely or from another context).
+            # However, in the context of process_pptx, it has either completed or failed.
+            current_job_status_info = await get_job_status(job_id)
+            
+            # Check if the job is truly finished (completed or failed) before cleaning up.
+            # This helps prevent premature deletion if the job is retried or requeued by a more advanced manager.
+            is_job_finished = current_job_status_info and current_job_status_info.status in [ProcessingStatus.COMPLETED, ProcessingStatus.FAILED]
+
+            if is_job_finished:
+                if os.path.exists(processing_output_dir): # This is the specific output dir for this run
+                    shutil.rmtree(processing_output_dir)
+                    logger.info(f"Cleaned up temporary processing output directory: {processing_output_dir}")
+                
+                # Clean up the original uploaded file and its parent directory if empty
+                if os.path.exists(uploaded_file_dir) and os.path.isdir(uploaded_file_dir):
+                    # Original file path
+                    original_upload_path = os.path.join(uploaded_file_dir, os.path.basename(file_path))
+                    if os.path.exists(original_upload_path) and os.path.isfile(original_upload_path):
+                        os.remove(original_upload_path)
+                        logger.info(f"Cleaned up original uploaded file: {original_upload_path}")
                     
-                    # Remove from job file paths cache
-                    if job_id in _job_file_paths:
-                        del _job_file_paths[job_id]
-        except Exception as e:
-            logger.error(f"Error cleaning up temporary files at {uploaded_file_dir}: {str(e)}")
+                    # Attempt to remove the parent directory if it's empty
+                    # This assumes uploaded_file_dir is specific to this job's upload
+                    # and doesn't contain other ongoing uploads.
+                    try:
+                        if not os.listdir(uploaded_file_dir): # Check if empty
+                            os.rmdir(uploaded_file_dir)
+                            logger.info(f"Cleaned up empty upload directory: {uploaded_file_dir}")
+                    except OSError:
+                        logger.debug(f"Upload directory not empty or other error, not removed: {uploaded_file_dir}")
+
+                # Remove from job file paths cache
+                if job_id in _job_file_paths:
+                    del _job_file_paths[job_id]
+            else:
+                logger.info(f"Job {job_id} is not marked as finished ({current_job_status_info.status if current_job_status_info else 'unknown'}). Skipping cleanup of {processing_output_dir} and {uploaded_file_dir}.")
+
+        except Exception as e_cleanup:
+            logger.error(f"Error cleaning up temporary files for job {job_id} at {uploaded_file_dir}: {str(e_cleanup)}")
 
 
 async def process_slide_simplified(
