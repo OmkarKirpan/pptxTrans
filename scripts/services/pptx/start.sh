@@ -1,7 +1,6 @@
 #!/bin/bash
 
-# Start the PPTX Processor Service
-# This script helps start the PPTX processor service for development purposes
+# Script to start the PPTX processor service for local testing
 
 # Color codes for output
 RED='\033[0;31m'
@@ -12,98 +11,94 @@ MAGENTA='\033[0;35m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-# Default variables
-PPTX_SERVICE_PORT=${PPTX_SERVICE_PORT:-3001}
-SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL:-""}
-SUPABASE_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY:-""}
-
-# Print the banner
 echo -e "${MAGENTA}"
 echo "======================================================"
 echo "         PPTX Processor Service Launcher              "
 echo "======================================================"
 echo -e "${NC}"
 
-# Check if Docker is installed
-if ! command -v docker &> /dev/null; then
-    echo -e "${RED}Error: Docker is not installed or not in PATH${NC}"
-    echo "Please install Docker to continue"
-    exit 1
+# Check if the PPTX processor service directory exists
+if [ ! -d "services/pptx-processor" ]; then
+  echo -e "${RED}Error: services/pptx-processor directory not found!${NC}"
+  exit 1
 fi
 
-# Check if Docker is running
-if ! docker info &> /dev/null; then
-    echo -e "${RED}Error: Docker is not running${NC}"
-    echo "Please start Docker daemon to continue"
-    exit 1
-fi
+# Check if .env file already exists
+if [ ! -f "services/pptx-processor/.env" ]; then
+  # Create the .env file with required variables if it doesn't exist
+  echo -e "${BLUE}Creating .env file with required variables...${NC}"
 
-# Check for Supabase configuration
-if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_KEY" ]; then
-    echo -e "${YELLOW}Warning: Supabase configuration is incomplete${NC}"
-    echo "The PPTX processor service may not work correctly without Supabase credentials"
+  # Create a .env file with required variables
+  cat > services/pptx-processor/.env << EOF
+PORT=3001
+LOG_LEVEL=debug
+CORS_ORIGIN=http://localhost:3000
+UPLOADS_DIR=./uploads
+PROCESSING_DIR=./processing
+EOF
+
+  # Check if Supabase values are already in the file
+  if ! grep -q "SUPABASE_URL" services/pptx-processor/.env; then
+    # Supabase URL not found, add default values
+    cat >> services/pptx-processor/.env << EOF
+SUPABASE_URL=https://your-project-id.supabase.co
+SUPABASE_KEY=your-supabase-anon-key
+EOF
     
-    # Try to load from .env.local
-    if [ -f .env.local ]; then
-        echo -e "${BLUE}Found .env.local file. Attempting to load Supabase configuration...${NC}"
-        # Export variables from .env.local
-        export $(grep -v '^#' .env.local | grep NEXT_PUBLIC_SUPABASE | xargs)
-        SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL:-""}
-        SUPABASE_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY:-""}
-        
-        if [ -n "$SUPABASE_URL" ] && [ -n "$SUPABASE_KEY" ]; then
-            echo -e "${GREEN}Successfully loaded Supabase configuration from .env.local${NC}"
-        else
-            echo -e "${YELLOW}Could not find Supabase configuration in .env.local${NC}"
-        fi
-    fi
-fi
-
-# Create storage directories for the PPTX processor
-mkdir -p ./tmp/pptx-uploads
-mkdir -p ./tmp/pptx-processing
-
-echo -e "${BLUE}Starting PPTX Processor service on port $PPTX_SERVICE_PORT...${NC}"
-
-# Pull the image if needed
-echo -e "${CYAN}Pulling latest PPTX processor image...${NC}"
-docker pull ghcr.io/pptx-translator/pptx-processor:latest
-
-# Stop any existing container
-EXISTING_CONTAINER=$(docker ps -q --filter "name=pptx-processor")
-if [ -n "$EXISTING_CONTAINER" ]; then
-    echo -e "${YELLOW}Stopping existing PPTX processor container...${NC}"
-    docker stop $EXISTING_CONTAINER > /dev/null
-    docker rm $EXISTING_CONTAINER > /dev/null
-fi
-
-# Start the container
-echo -e "${GREEN}Starting PPTX processor container...${NC}"
-docker run -d \
-    --name pptx-processor \
-    -p $PPTX_SERVICE_PORT:3001 \
-    -v "$(pwd)/tmp/pptx-uploads:/app/uploads" \
-    -v "$(pwd)/tmp/pptx-processing:/app/processing" \
-    -e SUPABASE_URL="$SUPABASE_URL" \
-    -e SUPABASE_KEY="$SUPABASE_KEY" \
-    -e PORT=3001 \
-    ghcr.io/pptx-translator/pptx-processor:latest
-
-# Check if container started successfully
-if [ $? -eq 0 ]; then
-    echo -e "${GREEN}PPTX Processor service started successfully!${NC}"
-    echo -e "${BLUE}Service is available at: http://localhost:$PPTX_SERVICE_PORT${NC}"
-    echo ""
-    echo -e "${CYAN}To check if the service is running:${NC}"
-    echo "  curl http://localhost:$PPTX_SERVICE_PORT/api/health"
-    echo ""
-    echo -e "${CYAN}To view logs:${NC}"
-    echo "  docker logs pptx-processor"
-    echo ""
-    echo -e "${CYAN}To stop the service:${NC}"
-    echo "  docker stop pptx-processor"
-    echo ""
+    echo -e "${YELLOW}Please update services/pptx-processor/.env with your actual Supabase credentials.${NC}"
+    echo "Press Ctrl+C to exit or any key to continue..."
+    read -n 1 -s
+  fi
 else
-    echo -e "${RED}Failed to start PPTX Processor service${NC}"
-    echo "Check the Docker logs for more details"
-fi 
+  echo -e "${GREEN}Using existing .env file in pptx-processor directory.${NC}"
+fi
+
+# Create necessary directories for uploads and processing
+mkdir -p services/pptx-processor/uploads
+mkdir -p services/pptx-processor/processing
+
+# Navigate to the PPTX processor service directory
+cd services/pptx-processor
+
+# Check if Python is installed
+if ! command -v python &> /dev/null; then
+  echo -e "${RED}Error: Python is not installed or not in PATH!${NC}"
+  echo "Please install Python to continue"
+  exit 1
+fi
+
+# Check if required dependencies are installed
+echo -e "${BLUE}Checking dependencies...${NC}"
+if ! command -v libreoffice &> /dev/null; then
+  echo -e "${YELLOW}Warning: LibreOffice is not installed or not in PATH${NC}"
+  echo "Some features may not work correctly without LibreOffice"
+fi
+
+# Check if uv is installed
+if ! command -v uv &> /dev/null; then
+  echo -e "${RED}Error: uv is not installed or not in PATH!${NC}"
+  echo "Please install uv using: curl -sSf https://astral.sh/uv/install.sh | sh"
+  exit 1
+fi
+
+# Create and activate virtual environment with uv if it doesn't exist
+if [ ! -d ".venv" ]; then
+  echo -e "${BLUE}Creating virtual environment with uv...${NC}"
+  uv venv .venv
+fi
+
+# Activate virtual environment
+echo -e "${BLUE}Activating virtual environment...${NC}"
+source .venv/bin/activate
+
+# Install requirements if needed
+if [ -f "requirements.txt" ]; then
+  echo -e "${BLUE}Installing dependencies with uv...${NC}"
+  uv pip install -r requirements.txt
+fi
+
+# Run the service
+echo -e "${GREEN}Running PPTX processor service on port 3001...${NC}"
+uv python -m app.main
+
+# This script can be enhanced to include database setup, migrations, etc. 

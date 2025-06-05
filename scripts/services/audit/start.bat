@@ -9,25 +9,30 @@ if not exist "audit-service" (
     exit /b 1
 )
 
-REM Create or update the .env file
-echo Creating/updating .env file with required variables...
-(
-echo PORT=4006
-echo LOG_LEVEL=debug
-echo JWT_SECRET=local-development-secret-key
-echo CORS_ORIGIN=http://localhost:3000
-) > audit-service\.env
+REM Check if .env file already exists
+if not exist "audit-service\.env" (
+    REM Create the .env file with required variables if it doesn't exist
+    echo Creating .env file with required variables...
+    (
+    echo PORT=4006
+    echo LOG_LEVEL=debug
+    echo JWT_SECRET=local-development-secret-key
+    echo CORS_ORIGIN=http://localhost:3000
+    ) > audit-service\.env
 
-REM Check if Supabase values need to be added
-findstr /c:"SUPABASE_URL" audit-service\.env >nul
-if %ERRORLEVEL% neq 0 (
-    echo SUPABASE_URL=https://your-project-id.supabase.co >> audit-service\.env
-    echo SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-key >> audit-service\.env
-    echo SUPABASE_JWT_SECRET=your-supabase-jwt-secret >> audit-service\.env
-    
-    echo Please update audit-service\.env with your actual Supabase credentials.
-    echo Press Ctrl+C to exit or any key to continue...
-    pause >nul
+    REM Check if Supabase values need to be added
+    findstr /c:"SUPABASE_URL" audit-service\.env >nul
+    if %ERRORLEVEL% neq 0 (
+        echo SUPABASE_URL=https://your-project-id.supabase.co >> audit-service\.env
+        echo SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-key >> audit-service\.env
+        echo SUPABASE_JWT_SECRET=your-supabase-jwt-secret >> audit-service\.env
+        
+        echo Please update audit-service\.env with your actual Supabase credentials.
+        echo Press Ctrl+C to exit or any key to continue...
+        pause >nul
+    )
+) else (
+    echo Using existing .env file in audit-service directory.
 )
 
 REM Navigate to the audit service directory

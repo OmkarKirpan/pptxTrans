@@ -10,29 +10,34 @@ if [ ! -d "audit-service" ]; then
   exit 1
 fi
 
-# Create or update the .env file in the audit-service directory
-echo "Creating/updating .env file with required variables..."
+# Check if .env file already exists
+if [ ! -f "audit-service/.env" ]; then
+  # Create the .env file with required variables if it doesn't exist
+  echo "Creating .env file with required variables..."
 
-# Create a .env file with required variables
-cat > audit-service/.env << EOF
+  # Create a .env file with required variables
+  cat > audit-service/.env << EOF
 PORT=4006
 LOG_LEVEL=debug
 JWT_SECRET=local-development-secret-key
 CORS_ORIGIN=http://localhost:3000
 EOF
 
-# Check if Supabase values are already in the file
-if ! grep -q "SUPABASE_URL" audit-service/.env; then
-  # Supabase URL not found, add default values
-  cat >> audit-service/.env << EOF
+  # Check if Supabase values are already in the file
+  if ! grep -q "SUPABASE_URL" audit-service/.env; then
+    # Supabase URL not found, add default values
+    cat >> audit-service/.env << EOF
 SUPABASE_URL=https://your-project-id.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-key
 SUPABASE_JWT_SECRET=your-supabase-jwt-secret
 EOF
-  
-  echo "Please update audit-service/.env with your actual Supabase credentials."
-  echo "Press Ctrl+C to exit or any key to continue..."
-  read -n 1 -s
+    
+    echo "Please update audit-service/.env with your actual Supabase credentials."
+    echo "Press Ctrl+C to exit or any key to continue..."
+    read -n 1 -s
+  fi
+else
+  echo "Using existing .env file in audit-service directory."
 fi
 
 # Navigate to the audit service directory

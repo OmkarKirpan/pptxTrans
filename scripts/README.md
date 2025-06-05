@@ -7,12 +7,13 @@ This directory contains various utility scripts for managing services, running t
 ```
 scripts/
 ├── services/           # Service startup scripts
-│   ├── start-pptx-processor.*    # PPTX processor service scripts
-│   └── start-audit-service.*     # Audit service scripts
-├── tests/             # Integration and test scripts
+│   ├── audit/          # Audit service scripts (start.sh, start.bat)
+│   ├── pptx/           # PPTX processor service scripts (start.sh, start.bat)
+│   └── share/          # Share service scripts (start.sh, start.bat)
+├── tests/              # Integration and test scripts
 │   ├── test-pptx-integration.js  # PPTX processor integration tests
 │   └── test-audit-service.js     # Audit service tests
-└── utils/             # Utility scripts
+└── utils/              # Utility scripts
     └── check-audit-env.js        # Environment validation script
 ```
 
@@ -21,8 +22,15 @@ scripts/
 ### Services
 
 The `services/` directory contains startup scripts for various services:
-- `start-pptx-processor.sh/bat`: Starts the PPTX processor service
-- `start-audit-service.sh/bat`: Starts the audit service
+- `audit/start.sh` / `audit/start.bat`: Starts the Audit service
+- `pptx/start.sh` / `pptx/start.bat`: Starts the PPTX processor service
+- `share/start.sh` / `share/start.bat`: Starts the Share service
+
+**All service scripts now check for an existing `.env` file before creating one.** If the file exists, it will not be overwritten, preserving your custom configuration.
+
+**PPTX processor service scripts use [uv](https://github.com/astral-sh/uv) for Python environment and package management.**
+- The script will check for `uv` and prompt you to install it if missing.
+- It will create a `.venv` virtual environment if needed, install dependencies with `uv pip install`, and run the service with `uv python -m app.main`.
 
 ### Tests
 
@@ -40,12 +48,14 @@ The `utils/` directory contains utility scripts:
 ### Service Scripts
 ```bash
 # For Unix-like systems
-./services/start-pptx-processor.sh
-./services/start-audit-service.sh
+./services/audit/start.sh
+./services/pptx/start.sh
+./services/share/start.sh
 
 # For Windows
-.\services\start-pptx-processor.bat
-.\services\start-audit-service.bat
+./services/audit/start.bat
+./services/pptx/start.bat
+./services/share/start.bat
 ```
 
 ### Test Scripts
