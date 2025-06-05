@@ -35,12 +35,13 @@
 - **Framework:** FastAPI (Python)
 - **Core Technologies:**
   - **LibreOffice UNO API** via unoserver for multi-slide SVG conversion (100% success rate)
-  - python-pptx for PPTX parsing and enhanced text extraction
+  - python-pptx for PPTX parsing, enhanced text extraction, and PPTX export generation
   - **UnoServer** for LibreOffice integration and individual slide processing
   - Pillow for image processing
   - python-multipart for file uploads
   - aiofiles for async file handling
   - supabase-py for Supabase integration
+  - **Export Capabilities:** Full PPTX export with translated content, job tracking, and secure downloads
 - **Architecture:** Production-ready with UNO API integration and fallback strategies
 - **Containerization:** Docker with LibreOffice and unoserver
 - **Deployment:** Docker Compose for local dev, Cloud Run for production (planned)

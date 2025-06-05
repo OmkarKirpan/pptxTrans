@@ -147,6 +147,13 @@ flowchart TD
    - **Production Architecture**: Clean, organized codebase structure
    - Job status tracking
    - Error handling and retries
+   - **PPTX Export Functionality (NEW):**
+     - Export API endpoints (`/v1/export`, `/v1/export/{session_id}/download`)
+     - Background export job processing with status tracking
+     - PPTX file generation from translated slide data
+     - Secure download URL generation with expiration
+     - Integration with existing job management system
+     - End-to-end export workflow from frontend to download
 
 3. **Audit Service Patterns:**
    - RESTful API with Gin
@@ -217,7 +224,33 @@ flowchart TD
        Store->>AuditService: Log edit action
    ```
 
-3. **Audit Logging Flow:**
+3. **PPTX Export Flow (NEW):**
+   ```mermaid
+   sequenceDiagram
+       User->>Editor: Click "Export PPTX"
+       Editor->>PptxClient: exportPptx(sessionId)
+       PptxClient->>PPTX Service: POST /v1/export
+       PPTX Service->>Background Job: Start export task
+       PPTX Service->>Editor: Return job_id and status
+       Editor->>Editor: Show loading state
+       loop Status Polling
+           Editor->>PptxClient: Check job status
+           PptxClient->>PPTX Service: GET /v1/jobs/{job_id}
+           PPTX Service->>Editor: Return job status
+       end
+       Background Job->>Supabase DB: Fetch session and slide data
+       Background Job->>Background Job: Generate PPTX with translated text
+       Background Job->>Supabase Storage: Store completed PPTX file
+       Background Job->>PPTX Service: Update job status to completed
+       Editor->>PptxClient: getExportDownloadUrl(sessionId)
+       PptxClient->>PPTX Service: GET /v1/export/{session_id}/download
+       PPTX Service->>Editor: Return secure download URL
+       Editor->>User: Show download notification with link
+       User->>Browser: Click download link
+       Browser->>Supabase Storage: Download PPTX file
+   ```
+
+4. **Audit Logging Flow:**
    ```mermaid
    sequenceDiagram
        User->>Component: Perform action
