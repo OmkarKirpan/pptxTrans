@@ -207,7 +207,7 @@ export default function LandingPage() {
               </Button>
             </Link>
             <Link href="/dashboard/new-session">
-              <Button size="lg" variant="outline" className="w-full sm:w-auto border-primary-foreground/20 hover:bg-primary-foreground/10">
+              <Button size="lg" variant="outline" className="w-full sm:w-auto border-primary-foreground/20 hover:bg-primary-foreground/10 text-black">
                 Try Demo
               </Button>
             </Link>
