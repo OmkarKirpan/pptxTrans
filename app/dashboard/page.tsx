@@ -8,7 +8,9 @@ import SessionCard from "@/components/dashboard/session-card"
 import EmptyState from "@/components/dashboard/empty-state"
 import type { TranslationSession, SessionStatus } from "@/types"
 import { useSession } from "@/lib/store"
-import { Loader2 } from "lucide-react"
+import { Loader2, PlusCircle } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import Link from "next/link"
 
 export default function DashboardPage() {
   const supabase = createClient()
@@ -90,7 +92,14 @@ export default function DashboardPage() {
 
   return (
     <div className="flex min-h-screen flex-col bg-muted/40">
-      <DashboardHeader title="Dashboard" />
+      <DashboardHeader title="Dashboard">
+        <Button asChild size="lg">
+          <Link href="/dashboard/new-session">
+            <PlusCircle className="mr-2 h-5 w-5" />
+            Create New Session
+          </Link>
+        </Button>
+      </DashboardHeader>
       <main className="flex-1 p-4 sm:p-6 lg:p-8">
         {sessions.length === 0 ? (
           <EmptyState />
