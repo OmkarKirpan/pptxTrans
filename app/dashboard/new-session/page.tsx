@@ -13,10 +13,6 @@ import { Loader2 } from "lucide-react"
 const MOCK_LANGUAGES = [
   { value: "en", label: "English" },
   { value: "es", label: "Spanish" },
-  { value: "fr", label: "French" },
-  { value: "de", label: "German" },
-  { value: "ja", label: "Japanese" },
-  { value: "zh", label: "Chinese (Simplified)" },
 ]
 
 export default function NewSessionPage() {

@@ -47,8 +47,8 @@ export default function UploadWizard({ onComplete, supportedLanguages, userId }:
   const [isProcessingSubmittedConfig, setIsProcessingSubmittedConfig] = useState(false)
 
   const [sessionName, setSessionName] = useState("")
-  const [sourceLanguage, setSourceLanguage] = useState<string>("")
-  const [targetLanguage, setTargetLanguage] = useState<string>("")
+  const [sourceLanguage, setSourceLanguage] = useState<string>("en")
+  const [targetLanguage, setTargetLanguage] = useState<string>("es")
 
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [configError, setConfigError] = useState<string | null>(null)
