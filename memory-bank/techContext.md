@@ -52,6 +52,19 @@
 - **Containerization:** Docker
 - **Deployment:** Docker Compose for local dev, Cloud Run for production (planned)
 
+#### 1.2.3 Share Service (Planned)
+
+- **Framework:** Hono.js (TypeScript)
+- **Runtime:** Bun.js
+- **Libraries:**
+  - @supabase/supabase-js for Supabase integration
+  - jose or jsonwebtoken for JWT handling
+  - zod for validation
+  - pino for logging
+  - supertest for API testing
+- **Containerization:** Docker
+- **Deployment:** Docker Compose for local dev, Cloud Run for production (planned)
+
 ### 1.3 Backend as a Service (BaaS)
 
 - **Platform:** Supabase

@@ -131,7 +131,16 @@ flowchart TD
    - Structured logging
    - Error handling middleware
 
-4. **Supabase Integration Patterns:**
+4. **Share Service Patterns (Planned):**
+   - RESTful API with Hono.js
+   - Bun.js runtime for performance
+   - JWT-based token system for secure sharing
+   - Permission-based access control
+   - Middleware for token validation
+   - Integration with Supabase for storage and authentication
+   - Rate limiting for security
+
+5. **Supabase Integration Patterns:**
    - Authentication via Supabase Auth
    - Database access via Supabase client
    - File storage in Supabase Storage

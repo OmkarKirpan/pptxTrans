@@ -32,6 +32,16 @@ graph TD
   - Error tracking
   - Performance monitoring
 
+### Share Service (Planned)
+- Location: `services/share-service/`
+- Purpose: Manages secure sharing of sessions with reviewers
+- Key Features:
+  - Token-based share link generation
+  - Access control for reviewers without accounts
+  - Configurable permissions (read/comment/edit)
+  - Expiration management
+  - Integration with audit logging
+
 ## Service Communication
 
 Services communicate through:

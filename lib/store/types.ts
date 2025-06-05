@@ -1,4 +1,5 @@
 import type { ProcessedSlide, SlideShape, TranslationSession } from '@/types'
+import type { ShareRecord, SharePermissions } from '@/types'
 
 // User role in a session
 export type UserRole = 'owner' | 'reviewer' | 'viewer'
@@ -161,6 +162,19 @@ export interface MergeState {
   clearAllSelections: () => void
 }
 
+// Share state slice
+export interface ShareState {
+  shares: ShareRecord[]
+  isLoading: boolean
+  error: string | null
+  
+  // Actions
+  generateShareLink: (sessionId: string, permissions: SharePermissions, expiresAt?: Date) => Promise<string>
+  listSessionShares: (sessionId: string) => Promise<void>
+  revokeShare: (shareId: string) => Promise<void>
+  clearShares: () => void
+}
+
 // Combined store type
 export interface AppStore extends 
   SessionState,
@@ -168,4 +182,5 @@ export interface AppStore extends
   EditBuffersState,
   CommentsState,
   NotificationsState,
-  MergeState {} 
+  MergeState,
+  ShareState {} 

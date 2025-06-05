@@ -8,6 +8,7 @@ import { createEditBuffersSlice } from './slices/edit-buffers-slice'
 import { createCommentsSlice } from './slices/comments-slice'
 import { createNotificationsSlice } from './slices/notifications-slice'
 import { createMergeSlice } from './slices/merge-slice'
+import { createShareSlice } from './slices/share-slice'
 
 /**
  * Create the main application store by combining all slices
@@ -35,6 +36,9 @@ export const useAppStore = create<AppStore>()(
         
         // Merge slice
         ...createMergeSlice(...a),
+        
+        // Share slice
+        ...createShareSlice(...a),
       }),
       {
         name: 'pptx-translator-storage',
@@ -46,6 +50,7 @@ export const useAppStore = create<AppStore>()(
           slides: state.slides,
           currentSlideId: state.currentSlideId,
           buffers: state.buffers,
+          shares: state.shares,
           // Do not persist notifications and comments - these will be fetched from the server
         }),
         // Use localStorage for persistence (survives browser restarts)
@@ -251,6 +256,37 @@ export const useMergeSelection = (slideId?: string) => {
     clearSelection,
     clearAllSelections
   }
+}
+
+// Share slice hooks
+export const useShare = () => {
+  const {
+    shares,
+    isLoading,
+    error,
+    generateShareLink,
+    listSessionShares,
+    revokeShare,
+    clearShares
+  } = useAppStore((state) => ({
+    shares: state.shares,
+    isLoading: state.isLoading,
+    error: state.error,
+    generateShareLink: state.generateShareLink,
+    listSessionShares: state.listSessionShares,
+    revokeShare: state.revokeShare,
+    clearShares: state.clearShares
+  }));
+  
+  return {
+    shares,
+    isLoading,
+    error,
+    generateShareLink,
+    listSessionShares,
+    revokeShare,
+    clearShares
+  };
 }
 
 // Export a default

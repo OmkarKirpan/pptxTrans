@@ -1,0 +1,42 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Cursor Rules - Bun First
+
+## Package Manager
+- Use `bun` instead of `npm`
+- Use `bunx` instead of `npx`
+- Use `bun add/remove` instead of `npm install/uninstall`
+
+## Runtime
+- Use `bun <file>` instead of `node <file>`
+- Use `bun run <script>` instead of `npm run <script>`
+- Use `bun test` instead of `npm test`
+
+## Command Translations
+```
+npm install → bun install
+npm install pkg → bun add pkg
+npm install -D pkg → bun add -d pkg
+npm uninstall pkg → bun remove pkg
+npm run script → bun run script
+npx command → bunx command
+node file.js → bun file.js
+npm init → bun init
+```
+
+## TypeScript
+- Use Bun's native TypeScript support (no ts-node needed)
+- Run TypeScript files directly with `bun file.ts`
+
+## Development
+- Use `bun --watch` for file watching
+- Prefer Bun's built-in test runner and bundler
+- Use `bun.lockb` lockfile instead of package-lock.json
+
+## Best Practices
+- Leverage Bun's speed and built-in features
+- Check Bun compatibility before suggesting npm alternatives
+- Use Bun for both development and production when possible

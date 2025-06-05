@@ -188,6 +188,7 @@
    - ⬜ Notification service for emails and alerts
    - ⬜ Analytics service for usage tracking
    - ⬜ User management service for teams and organizations
+   - 🔄 Share service for secure session sharing (in planning)
 
 ### Infrastructure & DevOps
 
@@ -243,6 +244,11 @@ The PowerPoint Translator App has made significant progress with several key com
    - Authentication, storage, and database functionality working
    - Real-time synchronization channels configured
    - Missing some advanced features like collaborative conflict resolution
+   
+5. **New Services in Planning:**
+   - Share service using Hono.js and Bun.js for secure session sharing with reviewers
+   - Service will enable token-based access with configurable permissions
+   - Planned integration with existing session_shares table and Audit Service
 
 ## Known Issues
 

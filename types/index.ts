@@ -79,3 +79,22 @@ export interface UploadedFile {
   storagePath?: string // Path in Supabase storage
   publicUrl?: string // Public URL for the file
 }
+
+// Export share types
+export interface ShareRecord {
+  id: string;
+  session_id: string;
+  share_token: string;
+  role: 'viewer' | 'commenter' | 'reviewer';
+  permissions: SharePermissions;
+  email?: string;
+  expires_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SharePermissions {
+  read: boolean;
+  comment: boolean;
+  edit: boolean;
+}

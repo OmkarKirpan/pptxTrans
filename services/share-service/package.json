@@ -1,0 +1,26 @@
+{
+  "name": "share-service",
+  "version": "0.1.0",
+  "module": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "start": "bun run src/index.ts",
+    "build": "bun build src/index.ts --outdir ./dist",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@hono/zod-validator": "^0.1.11",
+    "@supabase/supabase-js": "^2.38.4",
+    "hono": "^3.11.0",
+    "jose": "^5.1.0",
+    "pino": "^8.16.2",
+    "pino-pretty": "^10.2.3",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "bun-types": "latest",
+    "typescript": "^5.0.0"
+  }
+} 
