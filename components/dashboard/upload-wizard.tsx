@@ -8,14 +8,15 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import type { UploadedFile, TranslationSession } from "@/types"
+import type { UploadedFile } from "@/types"
 import { UploadCloud, FileText, CheckCircle, XCircle, ArrowRight, Loader2 } from "lucide-react"
 import Image from "next/image"
 import { useAuditLog } from "@/hooks/useAuditLog"
-import { useSession } from "@/lib/store"
+import { useTranslationSessions } from "@/lib/store"
 import { createClient } from "@/lib/supabase/client"
 import { PptxProcessorClient } from "@/lib/api/pptx-processor"
 import * as tus from "tus-js-client"
+import { CreateSessionPayload } from "@/types/api"
 
 interface UploadWizardProps {
   onComplete: (sessionId: string, sessionName: string) => void
@@ -43,6 +44,7 @@ export default function UploadWizard({ onComplete, supportedLanguages, userId }:
   const [isUploading, setIsUploading] = useState(false)
   const [isParsing, setIsParsing] = useState(false)
   const [isCreatingSession, setIsCreatingSession] = useState(false)
+  const [isProcessingSubmittedConfig, setIsProcessingSubmittedConfig] = useState(false)
 
   const [sessionName, setSessionName] = useState("")
   const [sourceLanguage, setSourceLanguage] = useState<string>("")
@@ -54,8 +56,8 @@ export default function UploadWizard({ onComplete, supportedLanguages, userId }:
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [jobId, setJobId] = useState<string | null>(null)
   
-  // Use the session slice from the store
-  const { setSession, setLoading, setError, isLoading, error } = useSession()
+  // Use the translation sessions slice
+  const { createSession, isCreating: isTranslationSessionCreating, error: translationSessionCreationError } = useTranslationSessions()
   
   // Create a temporary session ID for audit logging
   const tempSessionId = sessionId || 'temp-session-id'
@@ -274,140 +276,87 @@ export default function UploadWizard({ onComplete, supportedLanguages, userId }:
   }
 
   const handleConfigureSubmit = async () => {
-    if (!sessionName.trim()) {
-      setConfigError("Session name is required.")
-      return
-    }
-    if (!sourceLanguage || !targetLanguage) {
-      setConfigError("Source and target languages are required.")
-      return
-    }
-    if (sourceLanguage === targetLanguage) {
-      setConfigError("Source and target languages cannot be the same.")
+    if (!uploadedFile || !uploadedFile.storagePath || !sessionName || !sourceLanguage || !targetLanguage) {
+      setConfigError("Please fill in all required fields (file seems to be missing stored path).")
+      createAuditEvent('create', { 
+        action: 'session_configuration_failed', 
+        error: 'Missing fields or file storage path',
+        sessionNameAttempt: sessionName,
+        sourceLanguage,
+        targetLanguage,
+        originalFileName: uploadedFile?.file.name
+      });
       return
     }
     setConfigError(null)
-    setIsParsing(true)
-    
-    createAuditEvent('create', {
-      action: 'configuration_submitted',
+    setIsProcessingSubmittedConfig(true)
+
+    createAuditEvent('create', { 
+      action: 'session_configuration_submitted', 
       sessionName,
       sourceLanguage,
-      targetLanguage
-    })
+      targetLanguage,
+      originalFileName: uploadedFile.file.name,
+      filePath: uploadedFile.storagePath
+    });
 
     try {
-      // Prepare session data
-      const sessionData = {
-        name: sessionName,
-        user_id: userId,
-        source_language: sourceLanguage,
-        target_language: targetLanguage,
-        status: "draft" as const,
-        progress: 0,
-        slide_count: 0,
-        thumbnail_url: null,
-        original_file_path: uploadedFile?.storagePath || null
+      const payload: CreateSessionPayload = {
+        session_name: sessionName,
+        original_file_name: uploadedFile.file.name,
+        source_language_code: sourceLanguage,
+        target_language_codes: [targetLanguage],
       }
-  
-      setLoading(true)
-      
-      // Create session in Supabase
-      const { data, error } = await supabase
-        .from('translation_sessions')
-        .insert(sessionData)
-        .select()
-        .single();
-      
-      if (error) throw error;
-      
-      // Set the new session ID
-      const newSessionId = data.id;
-      setSessionId(newSessionId);
-      
-      setIsParsing(false)
-      setIsCreatingSession(true)
-      
-      // Create a session object to store in Zustand
-      const newSession: TranslationSession = {
-        id: newSessionId,
-        name: sessionName,
-        user_id: userId,
-        source_language: sourceLanguage,
-        target_language: targetLanguage,
-        status: "draft",
-        progress: 0,
-        slide_count: 0,
-        thumbnail_url: null,
-        original_file_path: uploadedFile?.storagePath || null,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      }
-      
-      // Update the store with the new session
-      setSession(newSession, 'owner')
-      
-      createAuditEvent('create', {
-        action: 'session_created',
-        newSessionId,
-        sessionName,
-        sourceLanguage,
-        targetLanguage
-      })
-      
-      // Process the PPTX file if it was uploaded successfully
-      if (uploadedFile && uploadedFile.file) {
-        try {
-          // Call the PPTX processor service
-          const processingResponse = await pptxProcessor.processPptx(
-            uploadedFile.file,
-            newSessionId,
-            sourceLanguage,
-            targetLanguage,
-            true // Generate thumbnails
-          )
-          
-          // Store the job ID for potential status checks
-          setJobId(processingResponse.job_id)
-          
+
+      const newSession = await createSession(payload)
+
+      if (newSession && newSession.id) {
+        setSessionId(newSession.id)
+
+        createAuditEvent('create', {
+          action: 'translation_session_created',
+          sessionId: newSession.id,
+          sessionName: newSession.session_name
+        });
+
+        const processResponse = await pptxProcessor.processPptx(
+          uploadedFile.file,
+          newSession.id,
+          sourceLanguage,
+          targetLanguage,
+          true
+        );
+
+        if (processResponse.job_id) {
+          setJobId(processResponse.job_id)
           createAuditEvent('create', {
             action: 'pptx_processing_started',
-            jobId: processingResponse.job_id,
-            sessionId: newSessionId
-          })
-          
-        } catch (processingError) {
-          console.error("Error processing PPTX:", processingError)
-          createAuditEvent('create', {
-            action: 'pptx_processing_failed',
-            error: processingError instanceof Error ? processingError.message : String(processingError),
-            sessionId: newSessionId
-          })
-          // Note: We don't block the user flow here, they can still proceed to the success step
-          // The processing will happen in the background
+            sessionId: newSession.id,
+            jobId: processResponse.job_id
+          });
+          setCurrentStep(STEPS.SUCCESS)
+          onComplete(newSession.id, newSession.session_name)
+        } else {
+          throw new Error(processResponse.error || "Failed to start PPTX processing job.")
         }
+      } else {
+        setConfigError(translationSessionCreationError || "Failed to create session record. Please try again.")
+        createAuditEvent('create', { 
+          action: 'translation_session_creation_failed', 
+          error: translationSessionCreationError || 'Unknown error from createSession',
+          sessionNameAttempt: sessionName,
+        });
       }
-      
-      setIsCreatingSession(false)
-      setLoading(false)
-      setCurrentStep(STEPS.SUCCESS)
-      
-    } catch (err) {
-      const error = err as Error
-      console.error("Error creating session:", error)
-      setConfigError("Failed to create session. Please try again.")
-      setIsCreatingSession(false)
-      setIsParsing(false)
-      setLoading(false)
-      setError(error.message)
-      
-      createAuditEvent('create', {
-        action: 'session_creation_failed',
-        error: 'Failed to create session',
-        sessionName,
-        sourceLanguage,
-        targetLanguage
-      })
+    } catch (err: any) {
+      console.error("Configuration or processing error:", err)
+      setConfigError(err.message || "An unexpected error occurred during configuration or processing.")
+      createAuditEvent('create', { 
+        action: 'session_configuration_or_processing_error', 
+        error: err.message || 'Unknown error',
+        sessionNameAttempt: sessionName,
+      });
+    } finally {
+      setIsProcessingSubmittedConfig(false)
     }
   }
 
@@ -610,7 +559,7 @@ export default function UploadWizard({ onComplete, supportedLanguages, userId }:
         <Button variant="outline" onClick={() => setCurrentStep(STEPS.UPLOAD)}>
           Back
         </Button>
-        <Button onClick={handleConfigureSubmit} disabled={isParsing || isCreatingSession}>
+        <Button onClick={handleConfigureSubmit} disabled={isProcessingSubmittedConfig}>
           Create Translation Session
         </Button>
       </div>

@@ -27,6 +27,12 @@ flowchart TD
             AuthMiddleware["Auth Middleware"]
         end
         
+        subgraph TranslationSessionService ["Translation Session Service (Hono.js/Bun.js)"]
+            TSS_API["REST API Endpoints"]
+            TSS_DB["Supabase DB Interaction"]
+            TSS_Auth["JWT Authentication"]
+        end
+        
         subgraph Supabase ["Supabase BaaS"]
             Auth["Authentication"]
             DB["PostgreSQL Database"]
@@ -40,6 +46,7 @@ flowchart TD
     Hooks --> Store
     PPTXProcessor --> Supabase
     AuditService --> Supabase
+    TranslationSessionService --> Supabase
     Client --> Supabase
 ```
 
@@ -140,7 +147,16 @@ flowchart TD
    - Integration with Supabase for storage and authentication
    - Rate limiting for security
 
-5. **Supabase Integration Patterns:**
+5. **Translation Session Service Patterns (NEW):**
+   - RESTful API with Hono.js for managing translation session lifecycle and metadata.
+   - Bun.js runtime for performance.
+   - JWT-based authentication (Supabase JWTs) to identify users and authorize actions.
+   - CRUD operations for translation sessions (create, read, update, delete).
+   - Stores translation session metadata in a dedicated `translation_sessions` table in Supabase.
+   - Interacts with the frontend to provide data for dashboards and the editor.
+   - Simple business logic focused on core session management for MVP.
+
+6. **Supabase Integration Patterns:**
    - Authentication via Supabase Auth
    - Database access via Supabase client
    - File storage in Supabase Storage
@@ -150,18 +166,19 @@ flowchart TD
 
 ### 2.3 Data Flow Patterns
 
-1. **Slide Processing Flow:**
+1. **Slide Processing & Session Creation Flow:**
    ```mermaid
    sequenceDiagram
        Client->>PPTX Service: Upload PPTX file
-       PPTX Service->>PPTX Service: Process in background
-       PPTX Service->>LibreOffice: Convert slides to SVG
-       PPTX Service->>python-pptx: Extract text and coordinates
+       PPTX Service->>PPTX Service: Process in background (SVG, text extraction)
        PPTX Service->>Supabase Storage: Store SVGs
-       PPTX Service->>Supabase DB: Store slide data
-       PPTX Service->>Client: Return job status
-       Client->>Supabase DB: Query processed slides
-       Client->>Supabase Storage: Fetch SVGs
+       PPTX Service->>Supabase DB: Store slide & shape data
+       PPTX Service->>Client: Return job status & core slide info (slide_count, original_file_name)
+       Client->>TranslationSessionService: Create Session (name, lang, slide_count, etc.)
+       TranslationSessionService->>Supabase DB: Store session metadata in 'translation_sessions' table
+       TranslationSessionService->>Client: Return created session
+       Client->>Supabase DB: Query processed slides for editor
+       Client->>Supabase Storage: Fetch SVGs for editor
        Client->>Client: Render slides with editable overlays
    ```
 

@@ -19,11 +19,14 @@
 
 - **Dashboard:**
   - ✅ Session listing with filter and sort
-  - ✅ New session creation
-  - ✅ Session card with thumbnail
+  - ✅ New session creation (Upload Wizard)
+    - ✅ File selection and configuration steps
+    - ✅ Prevention of multiple submissions during session creation and PPTX processing
+  - ✅ Session card with thumbnail (now uses `ApiTranslationSession` model)
   - ✅ Session details view
   - ✅ Share functionality
   - ✅ Session deletion
+  - ✅ Page now consumes `ApiTranslationSession` directly, removing local mapping.
 
 - **User Profile & Settings:**
   - ✅ Profile information update
@@ -50,6 +53,11 @@
   - ✅ Component integration across the application
   - ✅ Drag-and-drop slide reordering
   - ✅ Documentation in README.md
+  - ✅ `slidesSlice`: `fetchSlidesForSession` action to load slides and shapes.
+  - ✅ `slidesSlice`: Refactored `syncSlidesOrder`.
+  - ✅ `editBuffersSlice`: `saveBuffer` action now updates `slidesSlice` for persistence.
+  - ✅ `translationSessionsSlice`: `markSessionInProgress` and `markSessionCompleted` actions.
+  - ✅ Standardized on `ApiTranslationSession` type from `types/api/index.ts`, removing legacy `TranslationSession` from `types/index.ts`.
 
 - **Slide Editor:**
   - ✅ SVG-based slide rendering
@@ -58,9 +66,18 @@
   - ✅ Slide navigation
   - ✅ Zoom controls
   - ✅ Shape selection
-  - ✅ Basic audit logging integration
+  - ✅ Basic audit logging integration (with corrected `AuditAction` types)
   - ✅ Real-time slide updates
   - ✅ Optimistic editing with server sync
+  - ✅ Data fetching via Zustand:
+    - `useTranslationSessions().fetchSessionDetails(sessionId)` for session metadata.
+    - `useSlides().fetchSlidesForSession(sessionId)` for slide and shape data.
+  - ✅ Calls `updateLastOpenedAt(sessionId)` on editor open.
+  - ✅ Session status transitions:
+    - Automatically transitions from 'draft' to 'in_progress' on load.
+    - "Mark as Complete" button to transition from 'in_progress' to 'completed'.
+  - ✅ "Export PPTX" button disabled unless session status is 'completed'.
+  - ✅ Corrected prop usage for `DashboardHeader` and `SyncStatusIndicator`.
 
 ### Backend Services
 
@@ -91,7 +108,7 @@
   - ✅ Test infrastructure
   - ✅ Integration test examples
 
-- **Share Service (IN DEVELOPMENT):**
+- **Share Service (Further Refinement & Testing Needed):**
   - ✅ Hono.js framework service structure
   - ✅ Basic middleware setup (logging, CORS, error handling)
   - ✅ Project organization (controllers, models, middleware, utils)
@@ -99,12 +116,42 @@
   - ✅ Initial route structure
   - ✅ TypeScript configuration
   - ✅ Development scripts and build setup
-  - ⬜ JWT token generation and validation
-  - ⬜ Supabase integration for session_shares
-  - ⬜ Token management endpoints
-  - ⬜ Permission validation middleware
-  - ⬜ Rate limiting implementation
-  - ⬜ Frontend integration
+  - ✅ JWT token generation and validation
+  - ✅ Supabase integration for session_shares
+  - ✅ Token management endpoints
+  - ✅ Permission validation middleware
+  - ✅ Rate limiting implementation
+  - ✅ Frontend integration
+  - **Objective:** Allow users to securely share translation sessions with configurable permissions.
+  - **Status:** Core backend and frontend structures implemented. Critical linter/type issues pending in both backend controller and frontend imports. Backend requires modification to store and return full share URLs for copy functionality. Editor page adaptation for shared roles is pending. Full end-to-end testing needed.
+  - **Components:**
+    - **Backend (Hono.js Service - `services/share-service`):**
+        - JWT Utilities (`src/utils/jwt.ts`): Implemented.
+        - Database Repository (`src/db/shareRepository.ts`): Implemented for `session_shares` table.
+        - Models (`src/models/share.ts`): Defined.
+        - Controllers (`src/controllers/shareController.ts`): Implemented; **has critical `c.req.valid('json')` type error.**
+        - Auth Middleware (`src/middleware/authMiddleware.ts`): Implemented.
+        - Rate Limiting: Applied.
+        - Routing (`src/index.ts`): Implemented.
+    - **Frontend (Next.js App):**
+        - API Client (`lib/api/shareApi.ts`): Implemented; **has potential `@/types/share` path alias issue.**
+        - Type Definitions (`types/share.ts`): Defined.
+        - Zustand Slice (`lib/store/slices/share-slice.ts`): Implemented.
+        - Store Integration (`lib/store/index.ts`, `lib/store/types.ts`): Done; **may have lingering type resolution issues pending local TS server sync.**
+        - Share Modal UI (`components/dashboard/share-session-modal.tsx`): Implemented.
+        - Modal Integration (`components/dashboard/session-card.tsx`): Done.
+        - Shared Access Page (`app/shared/[token]/page.tsx`): Implemented.
+  - **What Works:**
+    - Backend service structure, JWT generation/validation, DB interaction logic (conceptual, pending controller fix).
+    - Frontend API client, Zustand store for shares, UI modal for share management (generation, listing, revocation), shared link handling page.
+  - **What's Next / In Progress:**
+    1.  **Resolve Critical Backend Linter Error:** Fix `c.req.valid('json')` type issue in `shareController.ts`.
+    2.  **Resolve Critical Frontend Path Alias:** Ensure `@/types/share` (and similar) resolve correctly.
+    3.  **Run `bun install`:** Ensure all dependencies (immer, uuid, etc.) are installed in both frontend and backend service.
+    4.  **Backend: Store and Return `share_url`:** Modify `shareRepository.ts` and `ShareRecord` model to include the full shareable URL when listing shares.
+    5.  **Frontend: Adapt Editor Page:** Modify `app/editor/[sessionId]/page.tsx` to consume `userRole` and `shareToken` from store, restricting UI/actions accordingly.
+    6.  **Testing:** Conduct thorough end-to-end testing of the sharing flow.
+    7.  **Audit Logging:** Integrate audit logging for share-related actions.
 
 ### Database & Storage
 
@@ -116,6 +163,7 @@
   - ✅ Triggers for `updated_at` timestamps
   - ✅ Database indexes for performance
   - ✅ Real-time channel configuration for sync
+  - ⬜ Selective subscriptions for performance
 
 ## What's Left to Build
 
@@ -142,6 +190,7 @@
    - ⬜ Batch operations for multiple shapes
    - ⬜ Image replacement capability
    - ⬜ Shape highlighting for untranslated text
+   - ⬜ Mobile optimization for critical workflows
 
 3. **Comments System:**
    - ⬜ UI components for comments display
@@ -188,6 +237,7 @@
    - ⬜ Performance optimization for large presentations
    - ⬜ Batch processing improvements
    - ⬜ Metrics collection for processing times
+   - ⬜ Performance optimization for high-volume logging
 
 2. **Audit Service:**
    - ⬜ Enhanced filtering capabilities
@@ -198,31 +248,22 @@
    - ⬜ Performance optimization for high-volume logging
 
 3. **New Backend Services:**
-   - ⬜ Translation API integration service
-   - ⬜ Export service for PPTX generation
-   - ⬜ Notification service for emails and alerts
-   - ⬜ Analytics service for usage tracking
-   - ⬜ User management service for teams and organizations
-   - 🔄 Share service for secure session sharing (in development)
+   - **Translation Session Service (Hono.js/Bun.js) (NEW):**
+     - ⬜ Design and implement service structure.
+     - ⬜ Define and create `translation_sessions` table in Supabase (SQL provided in techContext.md).
+     - ⬜ Develop API endpoints for session CRUD operations (Create, Read List, Read Detail, Update, Delete).
+     - ⬜ Secure endpoints with Supabase JWT authentication.
+     - ⬜ Implement logic for managing session metadata (name, languages, status, owner, timestamps).
 
-### Infrastructure & DevOps
+### Frontend Integration for New Services
 
-1. **Deployment Improvements:**
-   - ⬜ Continuous integration setup
-   - ⬜ Automated testing in CI pipeline
-   - ⬜ Staging environment configuration
-   - ⬜ Production environment setup
-   - ⬜ Monitoring and alerting
-   - ⬜ Backup and disaster recovery
-   - ⬜ Performance benchmarking
-
-2. **Documentation:**
-   - ⬜ API documentation with Swagger/OpenAPI
-   - ⬜ User documentation and help center
-   - ⬜ Developer onboarding guide
-   - ⬜ Architecture documentation
-   - ⬜ Troubleshooting guides
-   - ⬜ Performance tuning recommendations
+1.  **Translation Session Management Integration (NEW):**
+    - ⬜ Create API client functions for `TranslationSessionService`.
+    - ⬜ Develop/Update Zustand store slice(s) for translation session data.
+    - ⬜ Update Dashboard to list sessions from `TranslationSessionService`.
+    - ⬜ Implement actions on dashboard (create, rename, delete, open session).
+    - ⬜ Modify `UploadWizard` to register sessions with `TranslationSessionService` after PPTX processing.
+    - ⬜ Ensure editor page loads session metadata and updates `last_opened_at` via the service.
 
 ## Current Status
 

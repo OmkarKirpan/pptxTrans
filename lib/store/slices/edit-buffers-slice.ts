@@ -1,7 +1,13 @@
 import { StateCreator } from 'zustand'
 import type { EditBuffersState, EditBuffer } from '../types'
+import { SlidesState } from '../types'
 
-export const createEditBuffersSlice: StateCreator<EditBuffersState> = (set, get) => ({
+export const createEditBuffersSlice: StateCreator<
+  EditBuffersState & SlidesState,
+  [],
+  [],
+  EditBuffersState
+> = (set, get) => ({
   buffers: {},
   activeBufferId: null,
 
@@ -13,8 +19,8 @@ export const createEditBuffersSlice: StateCreator<EditBuffersState> = (set, get)
           shapeId,
           slideId,
           originalText,
-          translatedText: translatedText || '',
-          isDirty: false,
+          translatedText: translatedText || originalText,
+          isDirty: translatedText ? translatedText !== originalText : false,
           lastModified: new Date()
         }
       },
@@ -39,22 +45,24 @@ export const createEditBuffersSlice: StateCreator<EditBuffersState> = (set, get)
       }
     }),
   
-  saveBuffer: (shapeId: string) => 
-    set(state => {
-      const buffer = state.buffers[shapeId]
-      if (!buffer) return state
-      
-      // In a real app, this would trigger an API call to save the translation
-      return {
-        buffers: {
-          ...state.buffers,
-          [shapeId]: {
-            ...buffer,
-            isDirty: false
-          }
-        }
+  saveBuffer: async (shapeId: string) => {
+    const buffer = get().buffers[shapeId]
+    if (buffer && buffer.isDirty) {
+      try {
+        await get().updateShape(buffer.slideId, buffer.shapeId, { translated_text: buffer.translatedText })
+        
+        set(state => ({
+          buffers: {
+            ...state.buffers,
+            [shapeId]: { ...buffer, isDirty: false },
+          },
+        }))
+      } catch (error) {
+        console.error("Error saving buffer (syncing shape update):", error)
+        throw error
       }
-    }),
+    }
+  },
   
   discardBuffer: (shapeId: string) => 
     set(state => {

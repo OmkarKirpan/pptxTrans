@@ -12,22 +12,6 @@ export type { User, SessionState, SessionActions } from './store/session'
 
 export type SessionStatus = "draft" | "in-progress" | "ready"
 
-export interface TranslationSession {
-  id: string
-  user_id: string
-  name: string
-  created_at: string
-  updated_at: string
-  status: SessionStatus
-  progress: number
-  slide_count: number
-  source_language?: string | null
-  target_language?: string | null
-  thumbnail_url: string | null
-  original_file_path: string | null
-  translated_file_path?: string | null
-}
-
 export interface SlideShape {
   id: string
   slide_id: string

@@ -60,7 +60,7 @@ async function main() {
       case 'start':
         console.log(`${colors.green}Starting all services with Docker Compose...${colors.reset}`);
         await setupEnv();
-        await runCommand('docker', ['compose', 'up', '-d']);
+        await runCommand('docker-compose', ['up', '-d']);
         console.log(`${colors.green}Services started successfully!${colors.reset}`);
         console.log(`${colors.yellow}Frontend: http://localhost:3000${colors.reset}`);
         console.log(`${colors.yellow}Audit Service: http://localhost:4006${colors.reset}`);
@@ -70,32 +70,32 @@ async function main() {
         
       case 'stop':
         console.log(`${colors.yellow}Stopping all services...${colors.reset}`);
-        await runCommand('docker', ['compose', 'down']);
+        await runCommand('docker-compose', ['down']);
         console.log(`${colors.green}Services stopped successfully!${colors.reset}`);
         break;
         
       case 'restart':
         console.log(`${colors.yellow}Restarting all services...${colors.reset}`);
-        await runCommand('docker', ['compose', 'restart']);
+        await runCommand('docker-compose', ['restart']);
         console.log(`${colors.green}Services restarted successfully!${colors.reset}`);
         break;
         
       case 'rebuild':
         console.log(`${colors.yellow}Rebuilding all services...${colors.reset}`);
         await setupEnv();
-        await runCommand('docker', ['compose', 'build']);
+        await runCommand('docker-compose', ['build']);
         console.log(`${colors.green}Services rebuilt successfully!${colors.reset}`);
         break;
         
       case 'logs':
         const service = process.argv[3] || '';
         console.log(`${colors.yellow}Showing logs for ${service || 'all services'}...${colors.reset}`);
-        await runCommand('docker', ['compose', 'logs', '-f', service]);
+        await runCommand('docker-compose', ['logs', '-f', service]);
         break;
         
       case 'ps':
         console.log(`${colors.yellow}Listing running services...${colors.reset}`);
-        await runCommand('docker', ['compose', 'ps']);
+        await runCommand('docker-compose', ['ps']);
         break;
         
       case 'shell':
@@ -105,7 +105,7 @@ async function main() {
           process.exit(1);
         }
         console.log(`${colors.yellow}Opening shell in ${shellService}...${colors.reset}`);
-        await runCommand('docker', ['compose', 'exec', shellService, 'sh']);
+        await runCommand('docker-compose', ['exec', shellService, 'sh']);
         break;
         
       case 'env':

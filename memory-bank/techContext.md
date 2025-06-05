@@ -65,6 +65,20 @@
 - **Containerization:** Docker
 - **Deployment:** Docker Compose for local dev, Cloud Run for production (planned)
 
+#### 1.2.4 Translation Session Service (NEW)
+
+- **Framework:** Hono.js (TypeScript)
+- **Runtime:** Bun.js
+- **Libraries:**
+  - @supabase/supabase-js for Supabase integration
+  - jose for JWT handling (if needed, or Supabase client handles it)
+  - zod for validation
+  - pino or similar for logging (optional for MVP)
+- **Database:** Supabase (via `translation_sessions` table)
+- **Authentication:** Supabase JWT validation
+- **Containerization:** Docker (planned)
+- **Deployment:** Docker Compose for local dev, Cloud Run for production (planned)
+
 ### 1.3 Backend as a Service (BaaS)
 
 - **Platform:** Supabase
@@ -167,6 +181,38 @@ pkg/                   # Shared packages
 tests/                 # Test files
 ```
 
+### 3.4 Share Service Structure (IN DEVELOPMENT)
+
+```
+src/
+  controllers/
+  middleware/
+  models/
+  routes/
+  utils/
+  index.ts
+package.json
+tsconfig.json
+Dockerfile
+```
+
+### 3.5 Translation Session Service Structure (NEW)
+
+```
+services/translation-session-service/
+  src/
+    index.ts              # Main Hono app setup
+    routes.ts             # API routes definition
+    controller.ts         # Request handlers/business logic
+    model.ts              # TypeScript interfaces (e.g., TranslationSession)
+    db.ts                 # Supabase client and DB interaction functions
+    middleware.ts         # (Optional) JWT validation, error handling
+  package.json
+  tsconfig.json
+  bun.lockb
+  Dockerfile            # (Planned)
+```
+
 ## 4. Key Data Structures
 
 ### 4.1 Slide Processing Data Model
@@ -204,33 +250,40 @@ interface SlideShape {
 }
 ```
 
-### 4.2 Session Data Model
+### 4.2 Translation Session Data Model (`translation_sessions` table - NEW)
 
-```typescript
-interface Session {
-  id: string;
-  user_id: string;
-  title: string;
-  description?: string;
-  source_language: string;
-  target_language: string;
-  status: 'processing' | 'ready' | 'completed';
-  thumbnail_url?: string;
-  slide_count: number;
-  created_at: string;
-  updated_at: string;
-}
+```sql
+CREATE TABLE public.translation_sessions (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  user_id uuid NOT NULL,
+  session_name text NOT NULL,
+  original_file_name text NULL,
+  source_language_code character varying(10) NOT NULL,
+  target_language_codes text[] NOT NULL,
+  status text NOT NULL DEFAULT 'draft'::text, -- e.g., draft, in_progress, completed
+  slide_count integer NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  last_opened_at timestamptz NULL,
+  CONSTRAINT translation_sessions_pkey PRIMARY KEY (id),
+  CONSTRAINT translation_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE
+);
 
-interface SessionShare {
-  id: string;
-  session_id: string;
-  share_token: string;
-  role: 'reviewer' | 'viewer';
-  email?: string;
-  expires_at?: string;
-  created_at: string;
-  updated_at: string;
-}
+-- RLS Policies
+ALTER TABLE public.translation_sessions ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can manage their own translation sessions" ON public.translation_sessions
+  FOR ALL
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Authenticated users can create sessions" ON public.translation_sessions
+  FOR INSERT
+  WITH CHECK (auth.role() = 'authenticated');
+
+-- Auto-update updated_at timestamp
+CREATE TRIGGER handle_updated_at BEFORE UPDATE ON public.translation_sessions
+  FOR EACH ROW EXECUTE PROCEDURE moddatetime (updated_at);
 ```
 
 ### 4.3 Audit Log Data Model

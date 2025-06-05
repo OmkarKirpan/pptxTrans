@@ -1,5 +1,9 @@
-import type { ProcessedSlide, SlideShape, TranslationSession } from '@/types'
-import type { ShareRecord, SharePermissions } from '@/types'
+import type { ProcessedSlide, SlideShape } from '@/types'
+// Remove old SharePermissions import if it was specific to old ShareState
+// import type { ShareRecord, SharePermissions } from '@/types' 
+// Use new types from share-slice.ts (which internally imports from @/types/share)
+import type { ShareSliceState, ShareSliceActions } from './slices/share-slice';
+import type { TranslationSessionsSlice } from './slices/translationSessionsSlice';
 
 // User role in a session
 export type UserRole = 'owner' | 'reviewer' | 'viewer'
@@ -60,17 +64,12 @@ export interface MergeSelection {
 
 // Session state slice
 export interface SessionState {
-  currentSession: TranslationSession | null
   userRole: UserRole
   shareToken: string | null
-  isLoading: boolean
-  error: string | null
   
   // Actions
-  setSession: (session: TranslationSession, role: UserRole) => void
+  setUserRole: (role: UserRole) => void
   setShareToken: (token: string | null) => void
-  setLoading: (loading: boolean) => void
-  setError: (error: string | null) => void
   clearSession: () => void
 }
 
@@ -107,6 +106,7 @@ export interface SlidesState {
   setSyncStatus: (status: Partial<SyncStatus>) => void
   updateShape: (slideId: string, shapeId: string, updatedData: Partial<SlideShape>) => Promise<void>
   syncSlidesOrder: (slides: ProcessedSlide[]) => Promise<void>
+  fetchSlidesForSession: (sessionId: string) => Promise<void>
 }
 
 // Edit buffers state slice
@@ -162,18 +162,8 @@ export interface MergeState {
   clearAllSelections: () => void
 }
 
-// Share state slice
-export interface ShareState {
-  shares: ShareRecord[]
-  isLoading: boolean
-  error: string | null
-  
-  // Actions
-  generateShareLink: (sessionId: string, permissions: SharePermissions, expiresAt?: Date) => Promise<string>
-  listSessionShares: (sessionId: string) => Promise<void>
-  revokeShare: (shareId: string) => Promise<void>
-  clearShares: () => void
-}
+// New combined interface for the share slice
+export interface CombinedShareSlice extends ShareSliceState, ShareSliceActions {}
 
 // Combined store type
 export interface AppStore extends 
@@ -183,4 +173,5 @@ export interface AppStore extends
   CommentsState,
   NotificationsState,
   MergeState,
-  ShareState {} 
+  CombinedShareSlice,
+  TranslationSessionsSlice {} 

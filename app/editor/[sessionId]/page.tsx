@@ -8,7 +8,7 @@ import SlideNavigator from "@/components/editor/slide-navigator" // Assuming thi
 import SlideCanvas from "@/components/editor/slide-canvas"
 import CommentsPanel from "@/components/editor/comments-panel"
 import { createClient } from "@/lib/supabase/client"
-import type { ProcessedSlide, TranslationSession } from "@/types" // Updated type
+import type { ProcessedSlide } from "@/types" // Corrected import
 import { Loader2, AlertTriangle } from "lucide-react"
 import type { User } from "@supabase/supabase-js"
 import { Button } from "@/components/ui/button"
@@ -18,300 +18,136 @@ import { Label } from "@/components/ui/label"
 import { useAuditLog } from "@/hooks/useAuditLog" // Import audit log hook
 import { SyncStatusIndicator } from "@/components/editor/sync-status-indicator"
 import { useRealTimeSync } from "@/lib/services/realtime-sync"
+import { updateLastOpenedAt } from "@/lib/api/translationSessionApi" // Import the API function
 
 // Import Zustand hooks
-import { useSession, useSlides, useEditBuffers } from "@/lib/store"
+import { useSlides, useEditBuffers, useTranslationSessions } from "@/lib/store"
 
-// MOCK DATA using ProcessedSlide and new SlideShape structure
-const MOCK_PROCESSED_SLIDES: ProcessedSlide[] = [
-  {
-    id: "proc_slide_1",
-    session_id: "mock_session_1",
-    slide_number: 1,
-    svg_url: "/placeholder.svg?width=1280&height=720",
-    original_width: 1280,
-    original_height: 720,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    shapes: [
-      {
-        id: "s1_shp1_txt",
-        slide_id: "proc_slide_1",
-        type: "text",
-        original_text: "Main Title of Presentation",
-        translated_text: "Título Principal de la Presentación",
-        x_coordinate: 10, // percentage
-        y_coordinate: 15, // percentage
-        width: 80, // percentage
-        height: 15, // percentage
-        coordinates_unit: "percentage",
-        font_family: "Arial",
-        font_size: 44, // points
-        is_bold: true,
-        text_color: "#333333",
-        text_align: "center",
-        has_comments: true,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      },
-      {
-        id: "s1_shp2_txt",
-        slide_id: "proc_slide_1",
-        type: "text",
-        original_text: "Subtitle or key message here.",
-        x_coordinate: 10,
-        y_coordinate: 35,
-        width: 80,
-        height: 10,
-        coordinates_unit: "percentage",
-        font_family: "Calibri",
-        font_size: 28, // points
-        text_color: "#555555",
-        text_align: "center",
-        has_comments: false,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      },
-    ],
-  },
-  {
-    id: "proc_slide_2",
-    session_id: "mock_session_1",
-    slide_number: 2,
-    svg_url: "/placeholder.svg?width=1280&height=720",
-    original_width: 1280,
-    original_height: 720,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    shapes: [
-      {
-        id: "s2_shp1_txt",
-        slide_id: "proc_slide_2",
-        type: "text",
-        original_text: "Key Point 1",
-        x_coordinate: 5,
-        y_coordinate: 10,
-        width: 40,
-        height: 8,
-        coordinates_unit: "percentage",
-        font_size: 24,
-        has_comments: false,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      },
-      {
-        id: "s2_shp2_img_placeholder", // This shape won't be interactive if not 'text' type
-        slide_id: "proc_slide_2",
-        type: "image_placeholder", // Not 'text', so won't get an overlay
-        x_coordinate: 50,
-        y_coordinate: 20,
-        width: 45,
-        height: 60,
-        coordinates_unit: "percentage",
-        has_comments: false,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      },
-    ],
-  },
-]
+// MOCK DATA using ProcessedSlide and new SlideShape structure - REMOVE THIS
+// const MOCK_PROCESSED_SLIDES: ProcessedSlide[] = [ ... ];
 
 export default function SlideEditorPage() {
   const params = useParams()
   const router = useRouter()
-  const supabase = createClient()
+  // const supabase = createClient() // Keep if needed for other things, otherwise remove if all data via store
   const { subscribeToSession, unsubscribeFromSession } = useRealTimeSync()
 
   const sessionId = params.sessionId as string
   
-  // Initialize audit logging
   const { createAuditEvent } = useAuditLog(sessionId)
 
-  // Use Zustand store hooks
-  const {
-    currentSession,
-    setSession,
-    setLoading: setSessionLoading,
-    isLoading: isSessionLoading,
-    error: sessionError,
-    setError: setSessionError
-  } = useSession()
+  // Use TranslationSessions store for session metadata
+  const { 
+    currentSessionDetails, // Renamed from sessionData for clarity
+    fetchSessionDetails, 
+    isLoadingDetails: isSessionDetailsLoading, // Use this for loading state
+    error: translationSessionError, // Use this for error state
+    clearCurrentSessionDetails,
+    markSessionInProgress, // Added new action
+    markSessionCompleted // Added new action
+  } = useTranslationSessions()
   
+  // Use Slides store for slide data
   const {
     slides,
     currentSlideId,
-    currentSlide,
-    setSlides,
+    // currentSlide, // This can be derived: slides.find(s => s.id === currentSlideId)
+    // setSlides, // Data now set by fetchSlidesForSession
     setCurrentSlide,
-    updateSlideShapes,
-    slidesLoading,
-    setSlidesLoading,
-    slidesError,
-    setSlidesError,
-    updateShape
+    // updateSlideShapes, // Keep if used directly, or ensure it's part of other flows
+    slidesLoading, // Use this for loading state
+    // setSlidesLoading, // No longer set directly here
+    slidesError, // Use this for error state
+    // setSlidesError, // No longer set directly here
+    updateShape,
+    fetchSlidesForSession // New action
   } = useSlides()
   
   const {
     activeBufferId,
-    activeBuffer,
+    // activeBuffer, // This can be derived
     createBuffer,
     updateBuffer,
-    saveBuffer,
-    setActiveBuffer
+    saveBuffer, // Ensure this calls updateShape from useSlides
+    setActiveBuffer,
+    activeBuffer // Add activeBuffer here, it's computed in the hook
   } = useEditBuffers()
 
-  // Store for user data (not in Zustand yet)
-  const [user, setUser] = useState<User | null>(null)
+  const [user, setUser] = useState<User | null>(null) // Keep for user auth state
+
+  // Derived current slide
+  const currentSlide = slides.find(s => s.id === currentSlideId)
 
   useEffect(() => {
     const fetchData = async () => {
-      setSessionLoading(true)
-      setSlidesLoading(true)
+      // Loading states are now managed within their respective slices
       
+      const supabase = createClient(); // Create client locally for auth check
       const {
         data: { user: authUser },
         error: authError,
       } = await supabase.auth.getUser()
+
       if (authError || !authUser) {
         router.push("/auth/login")
         return
       }
       setUser(authUser)
 
-      // In a real app: Fetch session details and then fetch its processed slides & shapes
-      // const { data: sessionData, error: sessionError } = await supabase.from("translation_sessions")...
-      // const { data: slidesData, error: slidesError } = await supabase.from("slides").select("*, shapes:slide_shapes(*)").eq("session_id", sessionId)...
-      const mockSessionData: TranslationSession | undefined = {
-        id: sessionId,
-        user_id: authUser.id,
-        name: `Presentation ${sessionId.substring(0, 6)}`,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        status: "in-progress",
-        progress: 33,
-        slide_count: MOCK_PROCESSED_SLIDES.length,
-        thumbnail_url: MOCK_PROCESSED_SLIDES[0]?.svg_url || null,
-        original_file_path: `user_files/presentation_${sessionId}.pptx`,
-      }
-
-      if (!mockSessionData) {
-        setSessionError("Failed to load session details.")
-      } else {
-        // Update Zustand store
-        setSession(mockSessionData, 'owner')
-        setSlides(MOCK_PROCESSED_SLIDES)
-        if (MOCK_PROCESSED_SLIDES.length > 0) {
-          setCurrentSlide(MOCK_PROCESSED_SLIDES[0].id)
-        }
+      try {
+        await updateLastOpenedAt(sessionId)
+        createAuditEvent('view', { action: 'session_opened', sessionId });
         
-        // Log view event
-        createAuditEvent('view', { initialSlide: MOCK_PROCESSED_SLIDES[0]?.slide_number || 1 })
+        // Fetch session details first
+        await fetchSessionDetails(sessionId)
+        
+        // Access the just-fetched session details from the store to check status
+        // Need to use get() from the store instance or re-fetch/rely on the hook updating.
+        // For simplicity in a component, we can use a temporary variable if fetchSessionDetails returns the session.
+        // However, fetchSessionDetails in the slice returns void. So we rely on the hook to update.
+        // This means we might need another useEffect to react to currentSessionDetails changes for status update.
+        
+        // Fetch slides and shapes from Slides store
+        await fetchSlidesForSession(sessionId)
 
-        // Log view event when editor is first loaded
-        createAuditEvent('view', {
-          sessionId,
-          action: 'editor_opened'
-        })
+      } catch (error: any) {
+        console.error("Error fetching session or slide data:", error)
+        // Errors are now handled within the respective stores (translationSessionError, slidesError)
+        // No need to set a general error here, but can log or show a generic message if needed.
       }
-      
-      setSessionLoading(false)
-      setSlidesLoading(false)
     }
-    
+
     if (sessionId) {
       fetchData()
     }
-
-    // Subscribe to real-time updates when the component mounts
-    subscribeToSession(sessionId)
-
-    // Cleanup function to unsubscribe when the component unmounts
+    
+    // Cleanup when component unmounts or sessionId changes
     return () => {
       unsubscribeFromSession(sessionId)
+      clearCurrentSessionDetails() // Clear session details from store
+      // Optionally clear slides from slides store if desired:
+      // get().setSlides([]) // Assuming a clearSlides action exists or use setSlides([])
     }
-  }, [sessionId, supabase, router, createAuditEvent, setSession, setSlides, setCurrentSlide, setSessionLoading, setSlidesLoading, setSessionError, subscribeToSession, unsubscribeFromSession])
+  }, [sessionId, router, fetchSessionDetails, fetchSlidesForSession, createAuditEvent, unsubscribeFromSession, clearCurrentSessionDetails])
 
-  const handleSelectSlide = (slideId: string) => {
-    setCurrentSlide(slideId)
-    
-    // Log slide selection
-    const selected = slides.find((s) => s.id === slideId)
-    if (selected) {
-      createAuditEvent('view', { slideNumber: selected.slide_number })
+  // Effect for real-time subscription & status transition
+  useEffect(() => {
+    if (sessionId && currentSessionDetails && slides && slides.length > 0 && !slidesLoading && !isSessionDetailsLoading) {
+      subscribeToSession(sessionId)
+      createAuditEvent('view', { action: 'realtime_subscription_started', sessionId });
+
+      // Automatically transition status from draft to in_progress
+      if (currentSessionDetails.status === 'draft') {
+        markSessionInProgress(sessionId);
+        createAuditEvent('edit', { action: 'session_status_updated', sessionId, newStatus: 'in_progress' });
+      }
     }
-  }
+    // No explicit return for unsubscribe here, as it's handled in the main fetchData useEffect's cleanup
+  }, [sessionId, currentSessionDetails, slides, slidesLoading, isSessionDetailsLoading, subscribeToSession, createAuditEvent, markSessionInProgress])
 
-  const handleTextClick = (
-    shapeId: string, 
-    originalText: string, 
-    currentTranslation?: string,
-    shapeData?: any
-  ) => {
-    // Create or update buffer
-    createBuffer(shapeId, currentSlide?.id || '', originalText, currentTranslation)
-    
-    // Log text selection event with enhanced data
-    createAuditEvent('view', {
-      slideId: currentSlide?.id,
-      slideNumber: currentSlide?.slide_number,
-      shapeId,
-      action: 'opened_text_editor',
-      shapeDetails: shapeData
-    })
-  }
 
-  const handleSaveTranslation = async () => {
-    if (!activeBuffer || !activeBufferId) return
-    
-    try {
-      // Get the active buffer and corresponding shape/slide info
-      const { slideId, translatedText } = activeBuffer
-      
-      // Use the optimistic update method from the slides slice
-      await updateShape(slideId, activeBufferId, {
-        translated_text: translatedText
-      })
-      
-      // Save the buffer (marks it as not dirty)
-      saveBuffer(activeBufferId)
-      
-      // Create audit event for the translation
-      createAuditEvent('edit', {
-        action: 'save_translation',
-        shapeId: activeBufferId,
-        slideId: slideId,
-        text: translatedText
-      })
-      
-      // Close the edit dialog
-      setActiveBuffer(null)
-    } catch (error) {
-      console.error('Error saving translation:', error)
-      // Error handling will be done by the updateShape method and shown in the sync status indicator
-    }
-  }
-
-  const handleExport = async () => {
-    try {
-      // ... existing export logic ...
-      
-      // Log export event
-      createAuditEvent('export', {
-        format: 'pptx',
-        slideCount: slides.length
-      })
-    } catch (error) {
-      console.error("Export failed:", error)
-      // ... error handling ...
-    }
-  }
-
-  // Handle dialog close
-  const handleCloseDialog = () => {
-    setActiveBuffer(null)
-  }
-
-  if (isSessionLoading || slidesLoading) {
+  // Loading state: Check both session details and slides loading
+  if (isSessionDetailsLoading || slidesLoading) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -320,41 +156,164 @@ export default function SlideEditorPage() {
     )
   }
 
-  if (sessionError || slidesError) {
+  // Error state: Check errors from both slices
+  if (translationSessionError || slidesError) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center">
-        <AlertTriangle className="h-12 w-12 text-destructive" />
-        <p className="mt-4 text-xl text-destructive">{sessionError || slidesError}</p>
-        <Button className="mt-4" onClick={() => router.push("/dashboard")}>
-          Return to Dashboard
+      <div className="flex h-screen flex-col items-center justify-center p-4">
+        <AlertTriangle className="h-16 w-16 text-destructive mb-4" />
+        <h2 className="text-2xl font-semibold mb-2">Error Loading Session</h2>
+        <p className="text-muted-foreground mb-4 text-center">
+          There was an error loading the session data. Please try again later.
+        </p>
+        <p className="text-xs text-destructive-foreground bg-destructive/80 p-2 rounded">
+          {translationSessionError || slidesError}
+        </p>
+        <Button onClick={() => router.push('/dashboard')} className="mt-6">
+          Go to Dashboard
         </Button>
       </div>
     )
   }
 
-  if (!currentSession || !currentSlide) {
+  if (!currentSessionDetails || !user) { // Check currentSessionDetails from store
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center">
-        <AlertTriangle className="h-12 w-12 text-warning" />
-        <p className="mt-4 text-xl">Session or slide data not found.</p>
-        <Button className="mt-4" onClick={() => router.push("/dashboard")}>
-          Return to Dashboard
+      <div className="flex h-screen flex-col items-center justify-center">
+        <Loader2 className="h-16 w-16 animate-spin text-primary" />
+        <p className="mt-4 text-muted-foreground">Loading session data...</p>
+      </div>
+    )
+  }
+  
+  if (slides.length === 0 && !slidesLoading) {
+    return (
+      <div className="flex h-screen flex-col items-center justify-center p-4">
+        <AlertTriangle className="h-16 w-16 text-muted-foreground mb-4" />
+        <h2 className="text-2xl font-semibold mb-2">No Slides Found</h2>
+        <p className="text-muted-foreground mb-4 text-center">
+          This translation session does not have any slides processed yet, or there was an issue loading them.
+        </p>
+        <Button onClick={() => router.push('/dashboard')} className="mt-6">
+          Go to Dashboard
         </Button>
       </div>
     )
   }
+
+
+  // Ensure currentSlideId is valid, default to first slide if not
+  // This logic might be better placed in the slice or a selector
+  let activeSlideId = currentSlideId
+  if (!activeSlideId && slides.length > 0) {
+    activeSlideId = slides[0].id
+    // setCurrentSlide(slides[0].id); // Avoid calling set state during render if possible
+  }
+  const slideToDisplay = slides.find(s => s.id === activeSlideId) || slides[0];
+
+
+  // const handleSaveTranslation = async () => { // Original structure
+  // Modified to integrate with useEditBuffers and useSlides more cleanly
+  const handleSaveTranslation = async () => {
+    if (activeBufferId && activeBuffer && activeBuffer.isDirty && saveBuffer) { // Use activeBuffer from hook
+      try {
+        // The saveBuffer action in edit-buffers-slice now handles calling updateShape
+        await saveBuffer(activeBufferId) 
+        
+        createAuditEvent('edit', { 
+          action: 'text_translated', 
+          slideId: activeBuffer.slideId, // Use activeBuffer from hook
+          shapeId: activeBuffer.shapeId, // Use activeBuffer from hook
+        });
+
+      } catch (error) {
+        console.error("Error saving translation:", error)
+        // Handle error (e.g., show toast)
+      }
+      setActiveBuffer(null) // Close dialog / clear active buffer
+    }
+  }
+
+  // Ensure currentSlideId exists and is valid, if not, select the first slide
+  // This logic could also be part of a selector or inside the useEffect that fetches slides
+  useEffect(() => {
+    if (slides.length > 0 && !slides.find(s => s.id === currentSlideId)) {
+      setCurrentSlide(slides[0].id);
+    }
+  }, [slides, currentSlideId, setCurrentSlide]);
+
+  // Re-implement handleExport
+  const handleExport = async () => {
+    if (!currentSessionDetails) return;
+    try {
+      // Placeholder for actual export logic
+      console.log("Exporting session:", currentSessionDetails.id);
+      alert("Export functionality to be implemented.");
+
+      createAuditEvent('export', {
+        action: 'pptx_export_initiated',
+        sessionId: currentSessionDetails.id,
+        slideCount: slides.length,
+      });
+    } catch (error) {
+      console.error("Export failed:", error);
+      // Handle error (e.g., show toast)
+    }
+  };
+
+  // Re-implement handleTextClick
+  const handleTextClick = (
+    shapeId: string,
+    originalText: string,
+    currentTranslation?: string,
+    shapeData?: any // from SlideShape, for audit logging context
+  ) => {
+    if (!currentSlide) return;
+
+    createBuffer(shapeId, currentSlide.id, originalText, currentTranslation);
+    // setActiveBuffer(shapeId); // createBuffer now sets activeBufferId
+
+    createAuditEvent('view', { // Changed from 'edit' to 'view' as it's opening an editor
+      action: 'text_editor_opened',
+      slideId: currentSlide.id,
+      slideNumber: currentSlide.slide_number,
+      shapeId,
+      shapeDetails: shapeData, // Pass along for more context if available
+    });
+  };
+
+  // Re-implement handleCloseDialog
+  const handleCloseDialog = () => {
+    if (activeBufferId) {
+      // Decide if buffer should be discarded or just dialog closed
+      // For now, just closing the dialog by clearing activeBufferId
+      // If discard is needed: discardBuffer(activeBufferId);
+      setActiveBuffer(null);
+    }
+  };
+
+  const handleMarkComplete = async () => {
+    if (currentSessionDetails && currentSessionDetails.status === 'in_progress') {
+      await markSessionCompleted(currentSessionDetails.id);
+      createAuditEvent('edit', { action: 'session_status_updated', sessionId: currentSessionDetails.id, newStatus: 'completed' });
+      // Optionally, navigate away or show a success message
+      router.push('/dashboard'); // Navigate to dashboard after completion
+    }
+  };
 
   return (
-    <div className="flex h-full flex-col">
-      <DashboardHeader title={currentSession?.name || "Loading..."} showBackButton>
-        <div className="flex items-center gap-4">
+    <div className="flex h-screen flex-col bg-muted/40">
+      <DashboardHeader 
+        title={currentSessionDetails.session_name || "Slide Editor"} 
+        user={user}
+      >
+        <div className="flex items-center gap-2">
           <SyncStatusIndicator />
-          <Button 
-            onClick={handleExport} 
-            disabled={!currentSession || slidesLoading}
-            variant="outline"
-          >
-            Export
+          {currentSessionDetails && currentSessionDetails.status === 'in_progress' && (
+            <Button onClick={handleMarkComplete} size="sm" variant="outline">
+              Mark as Complete
+            </Button>
+          )}
+          <Button onClick={handleExport} disabled={slidesLoading || isSessionDetailsLoading || currentSessionDetails?.status !== 'completed'} size="sm">
+            Export PPTX
           </Button>
         </div>
       </DashboardHeader>
@@ -374,7 +333,7 @@ export default function SlideEditorPage() {
         {/* Center - Slide Canvas */}
         <div className="flex-1 overflow-y-auto bg-background p-6">
           <SlideCanvas
-            slide={currentSlide}
+            slide={slideToDisplay}
             onTextClick={handleTextClick}
             editable={true}
             showReadingOrder={false}
@@ -393,27 +352,31 @@ export default function SlideEditorPage() {
           <DialogHeader>
             <DialogTitle>Edit Translation</DialogTitle>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label htmlFor="original-text">Original Text</Label>
-              <div className="rounded-md bg-muted p-3 text-sm">{activeBuffer?.originalText}</div>
+          {activeBuffer && (
+            <div className="grid gap-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="original-text">Original Text</Label>
+                <Textarea id="original-text" value={activeBuffer.originalText} readOnly rows={4} className="bg-muted/50" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="translated-text">Translated Text</Label>
+                <Textarea 
+                  id="translated-text" 
+                  value={activeBuffer.translatedText} 
+                  onChange={(e) => activeBufferId && updateBuffer(activeBufferId, e.target.value)}
+                  rows={4} 
+                  placeholder="Enter translation..."
+                />
+              </div>
             </div>
-            <div className="grid gap-2">
-              <Label htmlFor="translated-text">Translation</Label>
-              <Textarea
-                id="translated-text"
-                value={activeBuffer?.translatedText || ''}
-                onChange={(e) => activeBufferId && updateBuffer(activeBufferId, e.target.value)}
-                placeholder="Enter translation here..."
-                rows={5}
-              />
-            </div>
-          </div>
+          )}
           <DialogFooter>
             <DialogClose asChild>
-              <Button variant="outline">Cancel</Button>
+              <Button variant="outline" onClick={handleCloseDialog}>Cancel</Button>
             </DialogClose>
-            <Button onClick={handleSaveTranslation}>Save Translation</Button>
+            <Button onClick={handleSaveTranslation} disabled={!activeBuffer?.isDirty}>
+              Save Translation
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

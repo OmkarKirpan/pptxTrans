@@ -42,15 +42,74 @@ The primary focus is shifting to enhancing and integrating the completed Zustand
    - Integrating with the Audit Service for activity tracking
    - Enhanced with real-time synchronization and optimistic updates
 
+6. **Translation Session Management (NEW FOCUS):**
+   - Design and implement a new `TranslationSessionService` (Hono.js/Bun.js) to manage the lifecycle and metadata of translation sessions (e.g., name, languages, status, owner).
+   - Define and create a `translation_sessions` table in Supabase.
+   - Develop API endpoints for CRUD operations on translation sessions.
+   - Integrate this service with the frontend dashboard for listing, creating, and managing sessions.
+   - Modify the `UploadWizard` to create a session record in `translation_sessions` after PPTX processing.
+
 ## 2. Recent Changes & Accomplishments
-- **Share Service Implementation (IN PROGRESS):**
-  - Set up basic Hono.js application structure with Bun.js runtime
-  - Created middleware stack for logging, error handling, and CORS
-  - Implemented initial project structure with controllers, models, middleware, and utils
-  - Set up proper dependency management with package.json
-  - Configured TypeScript support and build scripts
-  - Added health check endpoint for monitoring
-  - Implemented basic route structure for share endpoints
+- **Upload Wizard Enhancement (COMPLETED):**
+  - Fixed an issue where the "Create Translation Session" button in the configure step could be clicked multiple times if backend processing was slow.
+  - Introduced `isProcessingSubmittedConfig` state in `upload-wizard.tsx` to disable the button throughout the entire session creation and PPTX processing flow.
+
+- **Editor Integration & Refinement (COMPLETED):**
+  - Refactored `app/editor/[sessionId]/page.tsx` to use Zustand store for all data management.
+  - Removed mock slide data and direct Supabase calls for fetching slides.
+  - Integrated `fetchSessionDetails(sessionId)` from `useTranslationSessions()` for session metadata.
+  - Integrated `fetchSlidesForSession(sessionId)` from `useSlides()` for slide and shape data.
+  - `lib/store/slices/slides-slice.ts`:
+    - Added `fetchSlidesForSession(sessionId)` action.
+    - Refactored `syncSlidesOrder` action.
+    - Corrected Supabase table names and type mismatches for `ProcessedSlide`.
+  - `lib/store/slices/edit-buffers-slice.ts`:
+    - Modified `saveBuffer` to use `updateShape()` from `slidesSlice` for persistence.
+  - Ensured `updateLastOpenedAt(sessionId)` is called when the editor opens.
+  - Updated loading and error state handling to use states from Zustand slices.
+  - Adjusted real-time subscription logic (`subscribeToSession`) to activate after initial data load.
+  - Corrected `AuditAction` types in `createAuditEvent` calls (e.g., 'read' to 'view').
+  - Fixed prop usage for `DashboardHeader` and `SyncStatusIndicator`.
+  - Re-implemented handler functions (`handleExport`, `handleTextClick`, etc.) for store-based data flow.
+
+- **Type Standardization for `TranslationSession` (COMPLETED):**
+  - Resolved type conflicts by standardizing on the API model `ApiTranslationSession` from `types/api/index.ts`.
+  - Refactored `components/dashboard/session-card.tsx` to use `ApiTranslationSession`, adjusting internal logic for field access, status mapping, progress calculation, and thumbnail display.
+  - Refactored `app/dashboard/page.tsx` to remove local mapping functions and pass `ApiTranslationSession` objects directly to `SessionCard`.
+  - Removed the legacy `TranslationSession` interface from `types/index.ts`.
+  - Identified `session-slice.ts` (using legacy model) for future cleanup.
+
+- **Session Status Flow - Phase 1 (COMPLETED):**
+  - `lib/store/slices/translationSessionsSlice.ts`:
+    - Added `markSessionInProgress(sessionId)` and `markSessionCompleted(sessionId)` actions.
+    - Corrected `fetchSessions` to handle union return type for `ApiTranslationSession[] | PaginatedSessions<ApiTranslationSession>`.
+  - `lib/store/index.ts`: Updated `useTranslationSessions` hook to expose new status actions.
+  - `app/editor/[sessionId]/page.tsx`:
+    - Integrated status transition actions:
+      - 'draft' -> 'in_progress' automatically on load.
+      - 'in_progress' -> 'completed' via a "Mark as Complete" button in `DashboardHeader`.
+    - "Export PPTX" button is now disabled if session status is not 'completed'.
+
+- **Share Service Implementation (Further Refinement & Testing Needed):**
+  - **Backend (Hono.js/Bun.js - `services/share-service`):**
+    - Implemented JWT generation and validation utilities (`src/utils/jwt.ts`).
+    - Created database repository (`src/db/shareRepository.ts`) for `session_shares` table interactions (create, list, revoke, find by JTI).
+    - Defined data models (`src/models/share.ts`) for `ShareRecord`, `SharePermission`, etc.
+    - Developed Hono controllers (`src/controllers/shareController.ts`) for share operations (create, list, revoke, validate token) with Zod input validation.
+    - Implemented authentication middleware (`src/middleware/authMiddleware.ts`) using Supabase JWTs.
+    - Applied rate limiting to share service endpoints.
+    - Configured Hono routes in `src/index.ts` for the share API.
+    - *Critical Pending Issue:* A persistent linter error in `shareController.ts` related to `c.req.valid('json')` type inference needs resolution (likely a Hono/zod-validator versioning or TS environment issue).
+    - *Needed for UI:* Backend must be updated to store and return the full `share_url` in the `ShareRecord` when shares are listed to enable the "Copy Link" feature for existing shares.
+  - **Frontend (Next.js/Zustand):**
+    - Created API client functions (`lib/api/shareApi.ts`) to communicate with the backend Share Service.
+    - Defined frontend type definitions (`types/share.ts`) mirroring backend models.
+    - Implemented a Zustand store slice (`lib/store/slices/share-slice.ts`) for managing share-related state (session shares, loading/error states) and actions.
+    - Integrated the share slice into the main Zustand store (`lib/store/index.ts` and `lib/store/types.ts`).
+    - Developed `ShareSessionModal.tsx` UI component for generating, viewing, and revoking share links.
+    - Integrated the `ShareSessionModal` into `SessionCard.tsx`.
+    - Created `app/shared/[token]/page.tsx` for handling incoming shared links, validating tokens, setting session context (role, shareToken), and redirecting to the editor.
+    - *Pending Issue:* Potential `Cannot find module '@/types/share'` path alias issue to be resolved in local environment.
 
 - **Component Integration with Enhanced Store (COMPLETED):**
   - Updated all key components to use the real-time synchronized store:
@@ -157,53 +216,83 @@ The primary focus is shifting to enhancing and integrating the completed Zustand
   - Added proper navigation integration through dashboard header
 
 ## 3. Next Immediate Steps
-1. **Complete Share Service Implementation:**
-   - Implement token generation with JWT using jose library
-   - Create controller functions for creating, validating, and revoking share tokens
-   - Add integration with Supabase for session_shares table operations
-   - Implement middleware for token validation and permission checking
-   - Add rate limiting for security
-   - Create frontend integration components and store slice
-   - Test the complete share flow end-to-end
 
-2. **Enhance Comment System with Real-time Updates:**
-   - Apply the same real-time synchronization pattern to comments
-   - Implement optimistic updates for comment creation and editing
-   - Add notifications for new comments using real-time channels
-   - Test comment system with multiple concurrent users
+1.  **Session Status Flow - Dashboard UI Enhancements (COMPLETED):**
+    *   **Goal:** Visually represent session statuses in the `SessionCard`.
+    *   **Outcome:** `SessionCard` now displays status badges with distinct styles for `draft`, `in_progress`, `completed`, and `archived` based on `ApiTranslationSession['status']`. Legacy status mapping was removed.
 
-3. **Add Advanced Editing Features:**
-   - Implement a more robust text editing interface using edit buffers state
-   - Add undo/redo functionality leveraging persisted edit history
-   - Implement batch operations for multiple shape editing
-   - Add keyboard shortcuts for common editing operations
+2.  **Review and Cleanup `useSession` / `session-slice.ts` (COMPLETED):**
+    *   **Goal:** Remove or refactor the old `session-slice.ts` and its associated `useSession` hook, as its functionality has largely been superseded by `translationSessionsSlice` and direct user/auth context.
+    *   **Outcome:** `session-slice.ts` and the `useSession` hook have been significantly refactored. The slice now primarily manages `userRole` and `shareToken`, along with the `clearSession()` action. The legacy `currentSession` (and its problematic type) and associated loading/error states have been removed from this slice. Dependent components (`app/dashboard/new-session/page.tsx`, `components/dashboard/upload-wizard.tsx`, `app/dashboard/page.tsx`) have been updated to reflect these changes and rely on `translationSessionsSlice` or local state where appropriate.
 
-4. **Resolve LibreOffice SVG Generation Issues on Windows:**
-   - Debug the LibreOffice command-line arguments for better output
-   - Test different LibreOffice versions or configurations
-   - Consider alternative solutions if needed
+3. **Editor Integration - Final Review (COMPLETED):**
+    *   **Goal:** Perform a thorough review of the `app/editor/[sessionId]/page.tsx` and its interactions with Zustand stores.
+    *   **Outcome:** Review completed. The editor page demonstrates solid integration with `slidesSlice`, `editBuffersSlice`, and `translationSessionsSlice`. Data flow, real-time updates, status transitions, error handling, and audit logging are generally well-implemented. No critical issues found that require immediate remediation.
 
-5. **Connect Frontend to PPTX Processor Service:**
-   - Update the `UploadWizard` to send uploaded PPTX files to the processor service
-   - Implement polling mechanism to track processing status
-   - Display processing progress to users
+4.  **Implement `TranslationSessionService` (COMPLETED):**
+    *   **Goal:** Ensure the Hono.js/Bun.js service for managing translation session metadata is fully functional and correctly integrated.
+    *   **Outcome:** The `translation-session-service` has been reviewed and verified. It includes:
+        *   Correct Supabase client setup and environment variable usage.
+        *   Well-defined models (`TranslationSession`, payloads) consistent with frontend types.
+        *   Robust controller logic for CRUD operations (create, list with pagination/sort/filter, get by ID, update, delete) including Zod input validation and strict user ownership checks.
+        *   Secure Hono routing with an `authMiddleware` validating Supabase JWTs for all session endpoints.
+        *   Proper CORS configuration and a logging middleware.
+        *   API versioning at `/api/v1/sessions`.
+        *   Necessary scripts (`start`, `dev`) in `package.json`.
+        *   The frontend API client (`lib/api/translationSessionApi.ts`) has been updated to correctly target the service's versioned endpoints.
+    *   The service is deemed implemented and ready for deployment/use.
 
-6. **Complete Audit Logging Integration in Frontend:**
-   - Add audit logging for dashboard actions (sharing, export, deletion)
-   - Implement audit logging for batch operations
-   - Test the complete audit flow from frontend to backend
+5.  **Frontend Integration for Translation Sessions (COMPLETED):**
+    *   **Goal:** Ensure all frontend components correctly use the `TranslationSessionService` via `translationSessionsSlice` and `translationSessionApi.ts`.
+    *   **Outcome:** Verification completed. Key frontend integration points were reviewed:
+        *   **`UploadWizard`**: Correctly calls `createSession` via the store, which maps to the `POST /api/v1/sessions/` service endpoint. Payload matches.
+        *   **Dashboard (`app/dashboard/page.tsx`)**: Session deletion correctly calls `deleteSession` via the store, mapping to `DELETE /api/v1/sessions/:sessionId`.
+        *   **Editor Page (`app/editor/[sessionId]/page.tsx`)**: Correctly calls `fetchSessionDetails` (for `GET /api/v1/sessions/:sessionId`) and `updateLastOpenedAt` (which uses `updateSession` for `PATCH /api/v1/sessions/:sessionId`) via the store and API client.
+    *   The frontend integration with the `TranslationSessionService` for core CRUD operations appears correct and robust.
 
-7. **Enhance Error Handling:**
-   - Add error states to all slices for granular error management
-   - Implement retry mechanisms for failed operations
-   - Create error boundary components that leverage store error states
-   - Add toast notifications for error feedback using store state
+6. **Resolve Share Service Backend Linter Error:** Address the `c.req.valid('json')` type inference issue in `services/share-service/src/controllers/shareController.ts`.
+7. **Resolve Frontend Path Alias Issue:** Ensure `tsconfig.json` path aliases (e.g., for `@/types/share`) are correct and recognized.
+8. **Backend Update for Share Link Copying:** Modify share service to store and return `share_url` in `ShareRecord` for listed shares.
+9. **Adapt Editor for Shared Access:** Update `app/editor/[sessionId]/page.tsx` to restrict functionality based on `userRole` and `shareToken` from Zustand store.
+10. **Share Service End-to-End Testing:** Thoroughly test the complete sharing flow.
+11. **Enhance Comment System with Real-time Updates:**
+    - Apply the same real-time synchronization pattern to comments
+    - Implement optimistic updates for comment creation and editing
+    - Add notifications for new comments using real-time channels
+    - Test comment system with multiple concurrent users
 
-8. **Add Devtools and Debugging Support:**
-   - Fully integrate Zustand devtools middleware for all slices
-   - Add logging middleware for important state changes
-   - Create a debug panel component for development
-   - Implement time-travel debugging for the editor
+12. **Add Advanced Editing Features:**
+    - Implement a more robust text editing interface using edit buffers state
+    - Add undo/redo functionality leveraging persisted edit history
+    - Implement batch operations for multiple shape editing
+    - Add keyboard shortcuts for common editing operations
+
+13. **Resolve LibreOffice SVG Generation Issues on Windows:**
+    - Debug the LibreOffice command-line arguments for better output
+    - Test different LibreOffice versions or configurations
+    - Consider alternative solutions if needed
+
+14. **Connect Frontend to PPTX Processor Service:**
+    - Update the `UploadWizard` to send uploaded PPTX files to the processor service
+    - Implement polling mechanism to track processing status
+    - Display processing progress to users
+
+15. **Complete Audit Logging Integration in Frontend:**
+    - Add audit logging for dashboard actions (sharing, export, deletion)
+    - Implement audit logging for batch operations
+    - Test the complete audit flow from frontend to backend
+
+16. **Enhance Error Handling:**
+    - Add error states to all slices for granular error management
+    - Implement retry mechanisms for failed operations
+    - Create error boundary components that leverage store error states
+    - Add toast notifications for error feedback using store state
+
+17. **Add Devtools and Debugging Support:**
+    - Fully integrate Zustand devtools middleware for all slices
+    - Add logging middleware for important state changes
+    - Create a debug panel component for development
+    - Implement time-travel debugging for the editor
 
 ## 4. Active Decisions & Considerations
 - **Share Service Implementation:**
@@ -292,41 +381,34 @@ The primary focus is shifting to enhancing and integrating the completed Zustand
   - Complete state management integration before adding new features
   - Add persistence and offline support as secondary priority
 
-## 5. Share Service Implementation (IN PROGRESS)
+## 5. Share Service Implementation (Further Refinement & Testing Needed)
 
-A Share Service implementation is now in development using Hono.js, Bun.js, and Supabase SDK to enable secure sharing of translation sessions with reviewers:
+The Share Service enables secure, token-based sharing of translation sessions. Key components implemented include:
 
-- **Functionality:** 
-  - Owners can generate secure share links (token-based) to invite reviewers
-  - Reviewers can access via link without requiring a full account
-  - Configurable permissions (read, comment, edit) embedded in the token
-  - Token validation and expiration handling
+- **Backend Functionality:**
+  - Secure JWT generation (`jose`) for share tokens with embedded permissions (View, Comment) and expiry.
+  - CRUD-like operations for shares (create, list per session, revoke by JTI) via Hono API endpoints.
+  - Token validation endpoint.
+  - Supabase integration for storing share metadata in `session_shares` table (schema defined, assumed).
+  - Authentication middleware for protecting management endpoints; rate limiting applied.
 
-- **Technical Approach:**
-  - Implemented as a dedicated microservice (services/share-service)
-  - Using Hono.js framework with Bun.js runtime for performance
-  - Integrating with Supabase for authentication and database operations
-  - JWT-based tokens using jose library with embedded permissions and expiration
-  - Middleware for token validation and permission checking
+- **Frontend Integration:**
+  - Zustand store (`share-slice`) for managing share state and interactions.
+  - API client for communication with the share service.
+  - UI modal (`ShareSessionModal`) for managing shares (generate, list, revoke).
+  - Shared link handling page (`app/shared/[token]`) to validate tokens and set context for editor access.
   
-- **Current Progress:**
-  - Basic service structure set up with proper middleware configuration
-  - Project organization with controllers, models, middleware, and utils directories
-  - Health and basic route endpoints implemented
-  - Dependency setup with package.json and TypeScript configuration
-  - Development scripts for running, building, and testing the service
-  
-- **Integration Points:**
-  - Leveraging existing session_shares table in Supabase
-  - Will create Zustand store slice for frontend integration
-  - Will add UI components for share management
-  - Will implement audit logging via existing Audit Service
-  
-- **Security Considerations:**
-  - Token-based authentication with proper validation
-  - Configurable expiration times for limited access
-  - Granular permission controls
-  - Audit logging for all share-related actions
-  - Rate limiting to prevent abuse
-
-This service will enhance the collaborative capabilities of the PowerPoint Translator app, allowing owners to easily share their translation sessions with reviewers while maintaining control over access permissions.
+- **Current Status & Next Steps:**
+  - Core backend and frontend structures are in place.
+  - **Critical:** Resolve backend `c.req.valid('json')` type error in `shareController.ts`.
+  - **Critical:** Resolve frontend `@/types/share` path alias / module resolution.
+  - Backend needs update to store/return full `share_url` for listed shares to enable copy functionality.
+  - Editor page needs to be adapted to respect shared roles/permissions.
+  - Thorough end-to-end testing is required.
+   
+- **Security Considerations (Implemented/Considered):**
+  - Token-based authentication with JWTs, server-side validation.
+  - Configurable expiration times for tokens.
+  - Granular permissions (View, Comment) embedded in tokens.
+  - Rate limiting on API endpoints.
+  - Audit logging for share actions should be integrated via the existing Audit Service (not yet explicitly done for share actions).

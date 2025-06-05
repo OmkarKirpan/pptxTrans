@@ -1,108 +1,139 @@
 import { StateCreator } from 'zustand';
-import type { AppStore } from '../types';
-import type { ShareRecord, SharePermissions } from '@/types';
+import { produce } from 'immer';
+import {
+  ShareRecord,
+  SharePermission,
+  CreatedShareInfo,
+} from '@/types/share';
+import {
+  createShareToken as apiCreateShareToken,
+  listShareTokens as apiListShareTokens,
+  revokeShareToken as apiRevokeShareToken,
+} from '@/lib/api/shareApi';
 
-export interface ShareState {
-  shares: ShareRecord[];
-  isLoading: boolean;
-  error: string | null;
-  
-  // Actions
-  generateShareLink: (sessionId: string, permissions: SharePermissions, expiresAt?: Date) => Promise<string>;
-  listSessionShares: (sessionId: string) => Promise<void>;
-  revokeShare: (shareId: string) => Promise<void>;
-  clearShares: () => void;
+// Define the state structure for shares
+export interface ShareSliceState {
+  sessionShares: Record<string, ShareRecord[]>; // sessionId -> shares array
+  isLoadingCreate: boolean;
+  isLoadingList: Record<string, boolean>; // sessionId -> boolean
+  isLoadingRevoke: Record<string, boolean>; // shareTokenJti -> boolean
+  errorCreate: string | null;
+  errorList: Record<string, string | null>; // sessionId -> error message
+  errorRevoke: Record<string, string | null>; // shareTokenJti -> error message
 }
 
+// Define the actions available on the share slice
+export interface ShareSliceActions {
+  createShare: (
+    sessionId: string,
+    permissions: SharePermission[],
+    expiresIn?: string,
+    name?: string
+  ) => Promise<CreatedShareInfo | null>;
+  fetchShares: (sessionId: string) => Promise<void>;
+  revokeShare: (
+    shareTokenJti: string,
+    sessionId: string // Needed to update the correct session's list
+  ) => Promise<void>;
+  clearSharesForSession: (sessionId: string) => void;
+  clearAllShares: () => void;
+}
+
+const initialState: ShareSliceState = {
+  sessionShares: {},
+  isLoadingCreate: false,
+  isLoadingList: {},
+  isLoadingRevoke: {},
+  errorCreate: null,
+  errorList: {},
+  errorRevoke: {},
+};
+
 export const createShareSlice: StateCreator<
-  AppStore,
+  ShareSliceState & ShareSliceActions,
   [],
   [],
-  ShareState
+  ShareSliceState & ShareSliceActions
 > = (set, get) => ({
-  shares: [],
-  isLoading: false,
-  error: null,
-  
-  generateShareLink: async (sessionId, permissions, expiresAt) => {
-    set({ isLoading: true, error: null });
+  ...initialState,
+
+  createShare: async (sessionId, permissions, expiresIn, name) => {
+    set(produce((state: ShareSliceState) => {
+      state.isLoadingCreate = true;
+      state.errorCreate = null;
+    }));
     try {
-      const response = await fetch('/api/share', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          sessionId, 
-          permissions, 
-          expiresAt: expiresAt?.toISOString() 
-        }),
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to generate share link');
-      }
-      
-      const data = await response.json();
-      
-      // Refresh the list of shares after generating a new one
-      get().listSessionShares(sessionId);
-      
-      return data.shareUrl;
-    } catch (error: any) {
-      set({ error: error.message });
-      throw error;
-    } finally {
-      set({ isLoading: false });
-    }
-  },
-  
-  listSessionShares: async (sessionId) => {
-    set({ isLoading: true, error: null });
-    try {
-      const response = await fetch(`/api/share?sessionId=${sessionId}`);
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to fetch shares');
-      }
-      
-      const shares = await response.json();
-      set({ shares });
-    } catch (error: any) {
-      set({ error: error.message });
-      throw error;
-    } finally {
-      set({ isLoading: false });
-    }
-  },
-  
-  revokeShare: async (shareId) => {
-    set({ isLoading: true, error: null });
-    try {
-      const response = await fetch('/api/share', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shareId }),
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to revoke share');
-      }
-      
-      // Update the local state by removing the revoked share
-      set((state) => ({
-        shares: state.shares.filter((share) => share.id !== shareId)
+      const newShareInfo = await apiCreateShareToken(sessionId, permissions, expiresIn, name);
+      set(produce((state: ShareSliceState) => {
+        state.isLoadingCreate = false;
+        // We don't add to sessionShares here directly because the full ShareRecord isn't returned by create,
+        // only CreatedShareInfo. We should refetch or the share list should update via real-time if implemented.
+        // For now, we rely on a subsequent fetchShares or a UI refresh.
+        // Alternatively, construct a partial ShareRecord if absolutely necessary for optimistic updates.
       }));
-      
-      return;
+      // After creating, refresh the list for that session to get the full new record
+      await get().fetchShares(sessionId);
+      return newShareInfo;
     } catch (error: any) {
-      set({ error: error.message });
-      throw error;
-    } finally {
-      set({ isLoading: false });
+      set(produce((state: ShareSliceState) => {
+        state.isLoadingCreate = false;
+        state.errorCreate = error.message || 'Failed to create share link.';
+      }));
+      return null;
     }
   },
-  
-  clearShares: () => set({ shares: [] }),
+
+  fetchShares: async (sessionId) => {
+    set(produce((state: ShareSliceState) => {
+      state.isLoadingList[sessionId] = true;
+      state.errorList[sessionId] = null;
+    }));
+    try {
+      const shares = await apiListShareTokens(sessionId);
+      set(produce((state: ShareSliceState) => {
+        state.isLoadingList[sessionId] = false;
+        state.sessionShares[sessionId] = shares;
+      }));
+    } catch (error: any) {
+      set(produce((state: ShareSliceState) => {
+        state.isLoadingList[sessionId] = false;
+        state.errorList[sessionId] = error.message || 'Failed to fetch shares.';
+      }));
+    }
+  },
+
+  revokeShare: async (shareTokenJti, sessionId) => {
+    set(produce((state: ShareSliceState) => {
+      state.isLoadingRevoke[shareTokenJti] = true;
+      state.errorRevoke[shareTokenJti] = null;
+    }));
+    try {
+      await apiRevokeShareToken(shareTokenJti);
+      set(produce((state: ShareSliceState) => {
+        state.isLoadingRevoke[shareTokenJti] = false;
+        if (state.sessionShares[sessionId]) {
+          state.sessionShares[sessionId] = state.sessionShares[sessionId].filter(
+            (share) => share.share_token_jti !== shareTokenJti
+          );
+        }
+      }));
+    } catch (error: any) {
+      set(produce((state: ShareSliceState) => {
+        state.isLoadingRevoke[shareTokenJti] = false;
+        state.errorRevoke[shareTokenJti] = error.message || 'Failed to revoke share link.';
+      }));
+    }
+  },
+
+  clearSharesForSession: (sessionId) => {
+    set(produce((state: ShareSliceState) => {
+      delete state.sessionShares[sessionId];
+      delete state.isLoadingList[sessionId];
+      delete state.errorList[sessionId];
+    }));
+  },
+
+  clearAllShares: () => {
+    set(initialState);
+  },
 }); 

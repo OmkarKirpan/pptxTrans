@@ -1,32 +1,33 @@
 import { StateCreator } from 'zustand'
-import type { SessionState } from '../types'
-import type { TranslationSession } from '@/types'
-import type { UserRole } from '../types'
+import type { SessionState, UserRole } from '../types'
+// import type { TranslationSession } from '@/types' // Removed, no longer used here
 
 export const createSessionSlice: StateCreator<SessionState> = (set) => ({
-  currentSession: null,
-  userRole: 'viewer',
+  // currentSession: null, // Removed
+  userRole: 'viewer', // Default value
   shareToken: null,
-  isLoading: false,
-  error: null,
+  // isLoading: false, // Removed
+  // error: null, // Removed
 
-  setSession: (session: TranslationSession, role: UserRole) => 
-    set({ currentSession: session, userRole: role, error: null }),
+  // setSession: (session: TranslationSession, role: UserRole) =>  // Removed
+  //   set({ currentSession: session, userRole: role, error: null }),
+  setUserRole: (role: UserRole) => 
+    set({ userRole: role }),
   
   setShareToken: (token: string | null) => 
     set({ shareToken: token }),
   
-  setLoading: (loading: boolean) => 
-    set({ isLoading: loading }),
+  // setLoading: (loading: boolean) => // Removed
+  //   set({ isLoading: loading }),
   
-  setError: (error: string | null) => 
-    set({ error }),
+  // setError: (error: string | null) => // Removed
+  //   set({ error }),
   
   clearSession: () => 
     set({ 
-      currentSession: null, 
-      userRole: 'viewer', 
+      // currentSession: null, // Removed
+      userRole: 'viewer', // Reset to default
       shareToken: null, 
-      error: null 
+      // error: null // Removed
     }),
 }) 

@@ -5,11 +5,6 @@ WORKDIR /app
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     build-essential \
-    libcairo2-dev \
-    libfreetype6-dev \
-    libffi-dev \
-    inkscape \
-    ghostscript \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

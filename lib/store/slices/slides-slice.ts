@@ -216,50 +216,91 @@ export const createSlidesSlice: StateCreator<SlidesState> = (set, get) => ({
   },
 
   // Sync slide order with server
-  syncSlidesOrder: async (slides: ProcessedSlide[]) => {
+  syncSlidesOrder: async (slidesToSync: ProcessedSlide[]) => {
     set(state => ({
-      syncStatus: {
-        ...state.syncStatus,
-        isSyncing: true
-      }
-    }))
-
+      syncStatus: { ...state.syncStatus, isSyncing: true, error: null }
+    }));
     try {
-      // Create an array of updates to be processed in a transaction
-      const updates = slides.map((slide, index) => ({
-        id: slide.id,
-        slide_number: index + 1,
-        updated_at: new Date().toISOString()
-      }))
+      // Update slide_number and updated_at for each slide
+      const updates = slidesToSync.map(slide => 
+        supabase
+          .from('slides') // Corrected table name
+          .update({ 
+            slide_number: slide.slide_number,
+            updated_at: new Date().toISOString() 
+          })
+          .eq('id', slide.id)
+      );
+      
+      const results = await Promise.all(updates);
+      const errors = results.map(res => res.error).filter(Boolean);
 
-      // Use Supabase's upsert to update all slides in one go
-      const { error } = await supabase
-        .from('slides')
-        .upsert(updates)
-
-      if (error) {
-        throw error
+      if (errors.length > 0) {
+        console.error('Errors syncing slide order:', errors);
+        throw new Error(`Failed to sync slide order for ${errors.length} slides.`);
       }
 
-      // Update sync status on success
-      set({
-        syncStatus: {
-          isSyncing: false,
-          lastSynced: new Date().toISOString(),
-          error: null
-        }
-      })
-    } catch (error) {
-      console.error('Error syncing slide order:', error)
-      
-      // Set error status
       set(state => ({
-        syncStatus: {
-          isSyncing: false,
-          lastSynced: state.syncStatus.lastSynced,
-          error: error instanceof Error ? error.message : 'Failed to sync slide order'
+        slides: slidesToSync, // Update local state with the successfully synced order
+        syncStatus: { 
+          ...state.syncStatus, 
+          isSyncing: false, 
+          lastSynced: new Date().toISOString() 
         }
-      }))
+      }));
+    } catch (error: any) {
+      console.error('Error in syncSlidesOrder:', error);
+      set(state => ({
+        syncStatus: { 
+          ...state.syncStatus, 
+          isSyncing: false, 
+          error: error.message || 'Failed to sync slide order' 
+        }
+      }));
     }
   },
+
+  // --- New action to fetch all slides and shapes for a session ---
+  fetchSlidesForSession: async (sessionId: string) => {
+    set({ slidesLoading: true, slidesError: null, slides: [] }); // Reset slides array
+    try {
+      const { data: slidesData, error: slidesError } = await supabase
+        .from('slides') // Corrected table name
+        .select('*')
+        .eq('session_id', sessionId)
+        .order('slide_number', { ascending: true });
+
+      if (slidesError) throw slidesError;
+      if (!slidesData) throw new Error('No slides found for this session.');
+
+      const slidesWithShapes: ProcessedSlide[] = await Promise.all(
+        slidesData.map(async (slide) => {
+          // Ensure the slide object conforms to ProcessedSlide, especially if db schema differs slightly
+          const processedSlideData = slide as Omit<ProcessedSlide, 'shapes'>;
+
+          const { data: shapesData, error: shapesError } = await supabase
+            .from('slide_shapes')
+            .select('*')
+            .eq('slide_id', processedSlideData.id)
+            .order('id', { ascending: true }); // Or any other relevant order
+
+          if (shapesError) {
+            console.error(`Error fetching shapes for slide ${processedSlideData.id}:`, shapesError);
+            return { ...processedSlideData, shapes: [] }; 
+          }
+          // Ensure shapesData conforms to SlideShape[]
+          return { ...processedSlideData, shapes: (shapesData as SlideShape[]) || [] };
+        })
+      );
+
+      get().setSlides(slidesWithShapes); 
+
+    } catch (error: any) {
+      console.error('Error fetching slides for session:', error);
+      set({ slidesError: error.message || 'Failed to fetch slides', slides: [] });
+    } finally {
+      set({ slidesLoading: false });
+    }
+  },
+  // --- End of new action ---
 }) 

@@ -7,20 +7,53 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import type { TranslationSession } from "@/types"
+import type { TranslationSession as ApiTranslationSession } from "@/types/api"
+// import type { SessionStatus as LegacySessionStatus } from "@/types" // Removed
 import { formatDistanceToNow } from "date-fns"
 import { Share2, Download, Trash2, FileText, Clock, Languages, Loader2 } from "lucide-react"
 import Image from "next/image"
 import { useState } from "react"
-import { useSession } from "@/lib/store"
 import { createClient } from "@/lib/supabase/client"
 import { useAuditLog } from "@/hooks/useAuditLog"
 
 interface SessionCardProps {
-  session: TranslationSession
+  session: ApiTranslationSession
   onShare?: (sessionId: string) => void
   onExport?: (sessionId: string) => void
   onDelete?: (sessionId: string) => void
+}
+
+// Direct mapping for status text
+const statusText: Record<Exclude<ApiTranslationSession['status'], 'error'>, string> = {
+  draft: "Draft",
+  in_progress: "In Progress",
+  completed: "Completed",
+  archived: "Archived",
+  // error: "Error", // Removed as 'error' is not a valid status in ApiTranslationSession
+}
+
+// Function to get badge variant and classes
+const getStatusBadgeProps = (
+  status: ApiTranslationSession["status"],
+): { variant: "default" | "secondary" | "outline" | "destructive"; className?: string; text: string } => {
+  switch (status) {
+    case "draft":
+      return { variant: "outline", text: statusText.draft }
+    case "in_progress":
+      return { variant: "default", text: statusText.in_progress } // Uses theme's primary color
+    case "completed":
+      return {
+        variant: "secondary",
+        className: "bg-green-100 text-green-700 border-green-300 dark:bg-green-900 dark:text-green-300 dark:border-green-700",
+        text: statusText.completed,
+      }
+    case "archived":
+      return { variant: "outline", className: "text-muted-foreground border-muted-foreground/50", text: statusText.archived }
+    // case "error": // Removed
+    default: // Should not happen with a typed status
+      const exhaustiveCheck: never = status;
+      return { variant: "outline", text: "Unknown" }
+  }
 }
 
 export default function SessionCard({ session, onShare, onExport, onDelete }: SessionCardProps) {
@@ -30,45 +63,22 @@ export default function SessionCard({ session, onShare, onExport, onDelete }: Se
   const supabase = createClient()
   const { createAuditEvent } = useAuditLog(session.id)
   
-  // Use the session store
-  const { setSession, clearSession } = useSession()
-
-  const getStatusVariant = (
-    status: TranslationSession["status"],
-  ): "default" | "secondary" | "outline" | "destructive" => {
-    switch (status) {
-      case "draft":
-        return "secondary"
-      case "in-progress":
-        return "default" // Using primary color via default Badge style
-      case "ready":
-        return "destructive" // Changed from "success" to match available variants
-      default:
-        return "outline"
-    }
-  }
-
-  const statusText = {
-    draft: "Draft",
-    "in-progress": "In Progress",
-    ready: "Ready for Export",
-  }
+  const currentProgress = (
+    session.status === 'completed' ? 100 :
+    session.status === 'in_progress' ? 50 : // Assuming 50% for in_progress, could be more dynamic
+    0 // Draft or Archived
+  );
   
   const handleShare = async () => {
     setIsSharing(true)
-    
     try {
-      // Call the parent component's onShare handler if provided
       if (onShare) {
         onShare(session.id)
       } else {
-        // Handle sharing logic directly
         createAuditEvent('share', {
           action: 'share_session',
-          sessionName: session.name
+          sessionName: session.session_name
         })
-        
-        // Implement share functionality - for now just a placeholder
         console.log("Sharing session:", session.id)
       }
     } catch (error) {
@@ -79,23 +89,18 @@ export default function SessionCard({ session, onShare, onExport, onDelete }: Se
   }
   
   const handleExport = async () => {
-    if (session.status !== "ready") return
+    if (session.status !== "completed") return
     
     setIsExporting(true)
-    
     try {
-      // Call the parent component's onExport handler if provided
       if (onExport) {
         onExport(session.id)
       } else {
-        // Handle export logic directly
         createAuditEvent('export', {
           action: 'export_session',
-          sessionName: session.name,
-          slideCount: session.slide_count
+          sessionName: session.session_name,
+          slideCount: session.slide_count || 0
         })
-        
-        // Implement export functionality - for now just a placeholder
         console.log("Exporting session:", session.id)
       }
     } catch (error) {
@@ -107,60 +112,52 @@ export default function SessionCard({ session, onShare, onExport, onDelete }: Se
   
   const handleDelete = async () => {
     setIsDeleting(true)
-    
     try {
-      // Optimistically update UI by removing the session from the store
-      clearSession()
-      
-      // Call the parent component's onDelete handler if provided
       if (onDelete) {
         onDelete(session.id)
       } else {
-        // Handle delete logic directly
-        createAuditEvent('create', {
+        // TODO: Consider adding a more specific 'delete' AuditActionType in types/audit.ts
+        createAuditEvent('edit', { // Using 'edit' as a generic modification action for deletion
           action: 'delete_session',
-          sessionName: session.name
+          sessionName: session.session_name,
+          deletedSessionId: session.id // Adding more context for the 'edit' action
         })
-        
-        // Delete the session from Supabase
         const { error } = await supabase
           .from('translation_sessions')
           .delete()
           .eq('id', session.id)
-        
         if (error) throw error
       }
     } catch (error) {
       console.error("Error deleting session:", error)
-      
-      // If there was an error, restore the session in the store
-      setSession(session, 'owner')
     } finally {
       setIsDeleting(false)
     }
   }
 
+  const badgeProps = getStatusBadgeProps(session.status);
+
   return (
-    <Card className="flex h-full flex-col overflow-hidden shadow-lg transition-shadow hover:shadow-xl">
+    <Card className="flex h-full flex-col overflow-hidden shadow-lg transition-shadow hover:shadow-xl dark:border-slate-700">
       <CardHeader className="p-0">
         <div className="relative aspect-[16/9] w-full bg-muted">
           <Image
             src={
-              session.thumbnail_url || `/placeholder.svg?width=400&height=225&query=presentation+slide+${session.name}`
+              `/placeholder.svg?width=400&height=225&text=${encodeURIComponent(session.session_name || "Presentation")}`
             }
-            alt={`Thumbnail for ${session.name}`}
+            alt={`Thumbnail for ${session.session_name}`}
             layout="fill"
             objectFit="cover"
             className="transition-transform group-hover:scale-105"
           />
-          <Badge variant={getStatusVariant(session.status)} className="absolute right-2 top-2">
-            {statusText[session.status]}
+          <Badge variant={badgeProps.variant} className={`absolute right-2 top-2 ${badgeProps.className || ''}`}>
+            {badgeProps.text}
           </Badge>
         </div>
       </CardHeader>
       <CardContent className="flex-grow p-4">
         <CardTitle className="mb-1 text-lg leading-tight hover:text-primary">
-          <Link href={`/editor/${session.id}`}>{session.name}</Link>
+          <Link href={`/editor/${session.id}`}>{session.session_name}</Link>
         </CardTitle>
         <CardDescription className="mb-3 text-xs text-muted-foreground">
           <div className="flex items-center gap-1.5">
@@ -169,13 +166,13 @@ export default function SessionCard({ session, onShare, onExport, onDelete }: Se
           </div>
           <div className="mt-1 flex items-center gap-1.5">
             <FileText className="h-3 w-3" />
-            <span>{session.slide_count} slides</span>
+            <span>{session.slide_count || 0} slides</span>
           </div>
-          {session.source_language && session.target_language && (
+          {session.source_language_code && session.target_language_codes && session.target_language_codes.length > 0 && (
             <div className="mt-1 flex items-center gap-1.5">
               <Languages className="h-3 w-3" />
               <span>
-                {session.source_language} to {session.target_language}
+                {session.source_language_code} to {session.target_language_codes.join(', ')}
               </span>
             </div>
           )}
@@ -183,9 +180,9 @@ export default function SessionCard({ session, onShare, onExport, onDelete }: Se
         <div>
           <div className="mb-1 flex justify-between text-xs text-muted-foreground">
             <span>Progress</span>
-            <span>{session.progress}%</span>
+            <span>{currentProgress}%</span>
           </div>
-          <Progress value={session.progress} aria-label={`${session.progress}% translated`} className="h-2" />
+          <Progress value={currentProgress} aria-label={`${currentProgress}% translated`} className="h-2" />
         </div>
       </CardContent>
       <CardFooter className="border-t p-3">
@@ -200,48 +197,36 @@ export default function SessionCard({ session, onShare, onExport, onDelete }: Se
                   aria-label="Share session"
                   disabled={isSharing}
                 >
-                  {isSharing ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Share2 className="h-4 w-4" />
-                  )}
+                  {isSharing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Share2 className="h-4 w-4" />}
                 </Button>
               </TooltipTrigger>
               <TooltipContent>Share</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={handleExport}
-                  aria-label="Export session"
-                  disabled={session.status !== "ready" || isExporting}
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  onClick={handleExport} 
+                  aria-label="Export session" 
+                  disabled={session.status !== 'completed' || isExporting}
                 >
-                  {isExporting ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Download className="h-4 w-4" />
-                  )}
+                  {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                 </Button>
               </TooltipTrigger>
               <TooltipContent>Export</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={handleDelete}
-                  className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  onClick={handleDelete} 
                   aria-label="Delete session"
+                  className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                   disabled={isDeleting}
                 >
-                  {isDeleting ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Trash2 className="h-4 w-4" />
-                  )}
+                  {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                 </Button>
               </TooltipTrigger>
               <TooltipContent>Delete</TooltipContent>

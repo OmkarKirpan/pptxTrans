@@ -9,6 +9,11 @@ import { createCommentsSlice } from './slices/comments-slice'
 import { createNotificationsSlice } from './slices/notifications-slice'
 import { createMergeSlice } from './slices/merge-slice'
 import { createShareSlice } from './slices/share-slice'
+import { createTranslationSessionsSlice, type TranslationSessionsSlice } from './slices/translationSessionsSlice'
+
+// The AppStore type from ./types already includes all slices including the new share slice.
+// No need for ExtendedAppStore if AppStore is comprehensive.
+// type ExtendedAppStore = AppStore & TranslationSessionsSlice; // Review if TranslationSessionsSlice is already in AppStore
 
 /**
  * Create the main application store by combining all slices
@@ -39,19 +44,26 @@ export const useAppStore = create<AppStore>()(
         
         // Share slice
         ...createShareSlice(...a),
+        
+        // Translation Sessions slice (NEW)
+        ...createTranslationSessionsSlice(...a),
       }),
       {
         name: 'pptx-translator-storage',
         partialize: (state) => ({
-          // Only persist necessary parts of the state
-          currentSession: state.currentSession,
+          // Session slice parts
           userRole: state.userRole,
           shareToken: state.shareToken,
+          // Slides slice parts
           slides: state.slides,
           currentSlideId: state.currentSlideId,
+          // Edit buffers slice parts
           buffers: state.buffers,
-          shares: state.shares,
-          // Do not persist notifications and comments - these will be fetched from the server
+          // Share slice parts (Update this part)
+          sessionShares: state.sessionShares, // Persist sessionShares from the new ShareSliceState
+          // Translation sessions parts
+          sessions: state.sessions,
+          paginatedSessions: state.paginatedSessions,
         }),
         // Use localStorage for persistence (survives browser restarts)
         storage: typeof window !== 'undefined' ? {
@@ -80,28 +92,30 @@ export const useAppStore = create<AppStore>()(
 // Session slice hooks
 export const useSession = () => {
   const { 
-    currentSession, 
+    // currentSession, // Removed
     userRole, 
     shareToken, 
-    isLoading, 
-    error,
-    setSession,
+    // isLoading, // Removed
+    // error, // Removed
+    // setSession, // Removed
+    setUserRole, // Added
     setShareToken,
-    setLoading,
-    setError,
+    // setLoading, // Removed
+    // setError, // Removed
     clearSession 
   } = useAppStore()
   
   return {
-    currentSession,
+    // currentSession, // Removed
     userRole,
     shareToken,
-    isLoading,
-    error,
-    setSession,
+    // isLoading, // Removed
+    // error, // Removed
+    // setSession, // Removed
+    setUserRole, // Added
     setShareToken,
-    setLoading,
-    setError,
+    // setLoading, // Removed
+    // setError, // Removed
     clearSession
   }
 }
@@ -129,7 +143,8 @@ export const useSlides = () => {
     startReorder,
     updateReorderTarget,
     completeReorder,
-    cancelReorder
+    cancelReorder,
+    fetchSlidesForSession
   } = useAppStore()
   
   return {
@@ -154,6 +169,7 @@ export const useSlides = () => {
     updateReorderTarget,
     completeReorder,
     cancelReorder,
+    fetchSlidesForSession,
     // Computed values
     currentSlide: slides.find(slide => slide.id === currentSlideId) || null
   }
@@ -258,35 +274,82 @@ export const useMergeSelection = (slideId?: string) => {
   }
 }
 
-// Share slice hooks
+// Share slice hooks (REPLACE existing useShare hook)
 export const useShare = () => {
   const {
-    shares,
-    isLoading,
-    error,
-    generateShareLink,
-    listSessionShares,
+    sessionShares,
+    isLoadingCreate,
+    isLoadingSessionShares,
+    isLoadingRevoke,
+    errorCreate,
+    errorSessionShares,
+    errorRevoke,
+    createShare,
+    fetchShares,
     revokeShare,
-    clearShares
-  } = useAppStore((state) => ({
-    shares: state.shares,
-    isLoading: state.isLoading,
-    error: state.error,
-    generateShareLink: state.generateShareLink,
-    listSessionShares: state.listSessionShares,
-    revokeShare: state.revokeShare,
-    clearShares: state.clearShares
-  }));
+    clearSharesForSession,
+    clearAllShares,
+  } = useAppStore();
+
+  return {
+    sessionShares,
+    isLoadingCreate,
+    isLoadingSessionShares,
+    isLoadingRevoke,
+    errorCreate,
+    errorSessionShares,
+    errorRevoke,
+    createShare,
+    fetchShares,
+    revokeShare,
+    clearSharesForSession,
+    clearAllShares,
+  };
+}
+
+// Translation Sessions slice hooks (NEW)
+export const useTranslationSessions = () => {
+  const {
+    sessions,
+    paginatedSessions,
+    currentSessionDetails,
+    isLoadingList,
+    isLoadingDetails,
+    isCreating,
+    isUpdating,
+    isDeleting,
+    error,
+    fetchSessions,
+    createSession,
+    fetchSessionDetails,
+    updateSession,
+    deleteSession,
+    clearCurrentSessionDetails,
+    clearError,
+    markSessionInProgress,
+    markSessionCompleted
+  } = useAppStore()
   
   return {
-    shares,
-    isLoading,
+    sessions,
+    paginatedSessions,
+    currentSessionDetails,
+    isLoadingList,
+    isLoadingDetails,
+    isCreating,
+    isUpdating,
+    isDeleting,
     error,
-    generateShareLink,
-    listSessionShares,
-    revokeShare,
-    clearShares
-  };
+    fetchSessions,
+    createSession,
+    fetchSessionDetails,
+    updateSession,
+    deleteSession,
+    clearCurrentSessionDetails,
+    clearError,
+    markSessionInProgress,
+    markSessionCompleted
+  }
 }
 
 // Export a default

@@ -1,34 +1,38 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { createClient } from "@/lib/supabase/client"
 import DashboardHeader from "@/components/dashboard/dashboard-header"
 import SessionCard from "@/components/dashboard/session-card"
 import EmptyState from "@/components/dashboard/empty-state"
-import type { TranslationSession, SessionStatus } from "@/types"
-import { useSession } from "@/lib/store"
+import { useSession, useTranslationSessions } from "@/lib/store"
 import { Loader2, PlusCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
+import { createClient } from "@/lib/supabase/client"
+import type { TranslationSession as ApiTranslationSession } from "@/types/api"
 
 export default function DashboardPage() {
   const supabase = createClient()
   const router = useRouter()
-  const [sessions, setSessions] = useState<TranslationSession[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
   const { clearSession } = useSession()
-
+  
+  const {
+    sessions,
+    paginatedSessions,
+    isLoadingList,
+    error,
+    fetchSessions,
+    deleteSession,
+    clearCurrentSessionDetails
+  } = useTranslationSessions()
+  
   useEffect(() => {
-    async function fetchSessions() {
-      setLoading(true)
-      
+    async function checkAuthAndLoadSessions() {
       try {
-        // Clear any active session when visiting dashboard
         clearSession()
+        clearCurrentSessionDetails()
         
-        // Check if user is authenticated
         const { data: { user }, error: authError } = await supabase.auth.getUser()
         
         if (authError || !user) {
@@ -36,36 +40,25 @@ export default function DashboardPage() {
           return
         }
         
-        // Fetch sessions for the current user
-        const { data: sessionsData, error: sessionsError } = await supabase
-          .from("translation_sessions")
-          .select("*")
-          .eq("user_id", user.id)
-          .order("created_at", { ascending: false })
-          
-        if (sessionsError) {
-          throw sessionsError
-        }
-        
-        // Convert to properly typed TranslationSession[]
-        const typedSessions: TranslationSession[] = (sessionsData || []).map(session => ({
-          ...session,
-          status: session.status as SessionStatus,
-        }))
-        
-        setSessions(typedSessions)
+        await fetchSessions()
       } catch (err) {
-        console.error("Error fetching sessions:", err)
-        setError(err instanceof Error ? err.message : "Failed to load sessions")
-      } finally {
-        setLoading(false)
+        console.error("Error in dashboard initialization:", err)
       }
     }
     
-    fetchSessions()
-  }, [supabase, router, clearSession])
+    checkAuthAndLoadSessions()
+  }, [supabase, router, clearSession, fetchSessions, clearCurrentSessionDetails])
   
-  if (loading) {
+  const handleDeleteSession = async (sessionId: string) => {
+    if (!sessionId) return
+    try {
+      await deleteSession(sessionId)
+    } catch (error) {
+      console.error("Error deleting session:", error)
+    }
+  }
+
+  if (isLoadingList) {
     return (
       <div className="flex min-h-screen flex-col">
         <DashboardHeader title="Dashboard" />
@@ -89,6 +82,8 @@ export default function DashboardPage() {
       </div>
     )
   }
+  
+  const displaySessions = paginatedSessions?.items || sessions;
 
   return (
     <div className="flex min-h-screen flex-col bg-muted/40">
@@ -101,14 +96,15 @@ export default function DashboardPage() {
         </Button>
       </DashboardHeader>
       <main className="flex-1 p-4 sm:p-6 lg:p-8">
-        {sessions.length === 0 ? (
+        {displaySessions.length === 0 ? (
           <EmptyState />
         ) : (
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {sessions.map((session) => (
+            {displaySessions.map((session) => (
               <SessionCard
                 key={session.id}
                 session={session}
+                onDelete={handleDeleteSession}
               />
             ))}
           </div>
