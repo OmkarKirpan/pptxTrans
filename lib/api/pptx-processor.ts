@@ -1,11 +1,12 @@
-import { ProcessingResponse } from '@/types/pptx-processor';
+import { ProcessingResponse, ProcessingStatus } from '@/types/pptx-processor';
+import { fetchWithAuthAndCors, fetchWithCors } from './api-utils';
 
 const PPTX_PROCESSOR_URL = process.env.NEXT_PUBLIC_PPTX_PROCESSOR_URL || 'http://localhost:8000';
 
 export class PptxProcessorClient {
-  private token: string;
+  private token?: string;
   
-  constructor(token: string = '') {
+  constructor(token?: string) {
     this.token = token;
   }
   
@@ -34,16 +35,16 @@ export class PptxProcessorClient {
       
       formData.append('generate_thumbnails', String(generateThumbnails));
       
-      const response = await fetch(
-        `${PPTX_PROCESSOR_URL}/v1/process`,
-        {
-          method: 'POST',
-          headers: this.token ? {
-            'Authorization': `Bearer ${this.token}`,
-          } : {},
-          body: formData,
-        }
-      );
+      const fetchFunction = this.token ? fetchWithAuthAndCors : fetchWithCors;
+      const fetchOptions: RequestInit = {
+        method: 'POST',
+        body: formData,
+      };
+      
+      // Use the appropriate fetch function based on whether we have a token
+      const response = this.token 
+        ? await fetchWithAuthAndCors(`${PPTX_PROCESSOR_URL}/v1/process`, this.token, fetchOptions)
+        : await fetchWithCors(`${PPTX_PROCESSOR_URL}/v1/process`, fetchOptions);
       
       if (!response.ok) {
         // Handle specific error status codes
@@ -76,21 +77,21 @@ export class PptxProcessorClient {
   }
   
   /**
-   * Get the status of a processing job
+   * Check the status of a processing job
    */
-  async getProcessingStatus(jobId: string): Promise<ProcessingResponse> {
+  async getProcessingStatus(jobId: string): Promise<ProcessingStatus> {
     try {
-      const response = await fetch(
-        `${PPTX_PROCESSOR_URL}/v1/status/${jobId}`,
-        {
-          headers: this.token ? {
-            'Authorization': `Bearer ${this.token}`,
-            'Content-Type': 'application/json',
-          } : {
-            'Content-Type': 'application/json',
-          },
-        }
-      );
+      const fetchFunction = this.token ? fetchWithAuthAndCors : fetchWithCors;
+      const fetchOptions: RequestInit = {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      };
+      
+      // Use the appropriate fetch function based on whether we have a token
+      const response = this.token 
+        ? await fetchWithAuthAndCors(`${PPTX_PROCESSOR_URL}/v1/status/${jobId}`, this.token, fetchOptions)
+        : await fetchWithCors(`${PPTX_PROCESSOR_URL}/v1/status/${jobId}`, fetchOptions);
       
       if (!response.ok) {
         // Handle specific error status codes
@@ -124,17 +125,17 @@ export class PptxProcessorClient {
    */
   async getProcessingResults(sessionId: string): Promise<any> {
     try {
-      const response = await fetch(
-        `${PPTX_PROCESSOR_URL}/v1/results/${sessionId}`,
-        {
-          headers: this.token ? {
-            'Authorization': `Bearer ${this.token}`,
-            'Content-Type': 'application/json',
-          } : {
-            'Content-Type': 'application/json',
-          },
-        }
-      );
+      const fetchFunction = this.token ? fetchWithAuthAndCors : fetchWithCors;
+      const fetchOptions: RequestInit = {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      };
+      
+      // Use the appropriate fetch function based on whether we have a token
+      const response = this.token 
+        ? await fetchWithAuthAndCors(`${PPTX_PROCESSOR_URL}/v1/results/${sessionId}`, this.token, fetchOptions)
+        : await fetchWithCors(`${PPTX_PROCESSOR_URL}/v1/results/${sessionId}`, fetchOptions);
       
       if (!response.ok) {
         // Handle specific error status codes

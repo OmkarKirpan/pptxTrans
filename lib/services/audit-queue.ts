@@ -1,15 +1,20 @@
 import { AuditAction } from '@/types/audit';
+import { fetchWithAuthAndCors } from '../api/api-utils';
 
-interface AuditEventPayload {
+// Queue item structure
+interface QueuedAuditEvent {
   sessionId: string;
   type: AuditAction;
   details?: any;
-}
-
-interface QueuedAuditEvent extends AuditEventPayload {
   timestamp: number;
   retryCount: number;
 }
+
+// Constants
+const QUEUE_KEY_PREFIX = 'auditQueue_';
+const MAX_QUEUE_SIZE = 100;
+const MAX_RETRY_COUNT = 3;
+const RETRY_INTERVAL = 30000; // 30 seconds
 
 /**
  * Service for queuing and reliably sending audit events
@@ -17,47 +22,17 @@ interface QueuedAuditEvent extends AuditEventPayload {
  */
 export class AuditQueueService {
   private static instance: AuditQueueService;
-  private queue: QueuedAuditEvent[] = [];
-  private processing = false;
-  private maxRetries = 3;
-  private auditServiceUrl = process.env.NEXT_PUBLIC_AUDIT_SERVICE_URL || 'http://localhost:4006';
+  private initialized: boolean = false;
+  private processingQueue: boolean = false;
+  private retryTimeoutId: NodeJS.Timeout | null = null;
+  private currentSessionId: string | null = null;
+  private auditServiceUrl: string;
   
   private constructor() {
-    // Private constructor for singleton pattern
+    this.auditServiceUrl = process.env.NEXT_PUBLIC_AUDIT_SERVICE_URL || 'http://localhost:4006';
   }
   
-  // Create queue key based on sessionId to store in localStorage
-  private getQueueKey(sessionId: string): string {
-    return `audit_queue_${sessionId}`;
-  }
-  
-  // Load queue from localStorage
-  private loadQueue(sessionId: string): void {
-    try {
-      const savedQueue = localStorage.getItem(this.getQueueKey(sessionId));
-      if (savedQueue) {
-        const parsedQueue = JSON.parse(savedQueue);
-        // Only add events for the current session
-        this.queue = [
-          ...this.queue,
-          ...parsedQueue.filter((event: QueuedAuditEvent) => event.sessionId === sessionId)
-        ];
-      }
-    } catch (error) {
-      console.error('Failed to load audit queue from localStorage:', error);
-    }
-  }
-  
-  // Save queue to localStorage
-  private saveQueue(sessionId: string): void {
-    try {
-      localStorage.setItem(this.getQueueKey(sessionId), JSON.stringify(this.queue));
-    } catch (error) {
-      console.error('Failed to save audit queue to localStorage:', error);
-    }
-  }
-  
-  // Get singleton instance
+  // Singleton pattern
   public static getInstance(): AuditQueueService {
     if (!AuditQueueService.instance) {
       AuditQueueService.instance = new AuditQueueService();
@@ -65,81 +40,179 @@ export class AuditQueueService {
     return AuditQueueService.instance;
   }
   
-  // Add event to the queue
-  public enqueueEvent(event: AuditEventPayload, token: string): void {
-    const queuedEvent: QueuedAuditEvent = {
-      ...event,
+  // Initialize the queue for a specific session
+  public initializeForSession(sessionId: string): void {
+    this.currentSessionId = sessionId;
+    this.initialized = true;
+    this.loadQueue(sessionId);
+    this.processQueue();
+  }
+  
+  // Add a new audit event to the queue
+  public enqueueAuditEvent(
+    type: AuditAction,
+    details?: any
+  ): void {
+    if (!this.initialized || !this.currentSessionId) {
+      console.error('Audit queue not initialized. Call initializeForSession first.');
+      return;
+    }
+    
+    const sessionId = this.currentSessionId;
+    const event: QueuedAuditEvent = {
+      sessionId,
+      type,
+      details,
       timestamp: Date.now(),
       retryCount: 0
     };
     
-    this.queue.push(queuedEvent);
-    this.saveQueue(event.sessionId);
+    this.addToQueue(sessionId, event);
     
-    // Start processing if not already running
-    if (!this.processing) {
-      this.processQueue(token);
+    if (!this.processingQueue) {
+      this.processQueue();
     }
   }
   
-  // Process the queue
-  private async processQueue(token: string): Promise<void> {
-    if (this.queue.length === 0 || this.processing) {
+  // Load the queue from localStorage
+  private loadQueue(sessionId: string): QueuedAuditEvent[] {
+    try {
+      const queueString = localStorage.getItem(`${QUEUE_KEY_PREFIX}${sessionId}`);
+      if (queueString) {
+        return JSON.parse(queueString);
+      }
+    } catch (error) {
+      console.error('Error loading audit queue from localStorage:', error);
+    }
+    return [];
+  }
+  
+  // Save the queue to localStorage
+  private saveQueue(sessionId: string, queue: QueuedAuditEvent[]): void {
+    try {
+      localStorage.setItem(`${QUEUE_KEY_PREFIX}${sessionId}`, JSON.stringify(queue));
+    } catch (error) {
+      console.error('Error saving audit queue to localStorage:', error);
+    }
+  }
+  
+  // Add an event to the queue
+  private addToQueue(sessionId: string, event: QueuedAuditEvent): void {
+    const queue = this.loadQueue(sessionId);
+    
+    // Ensure queue doesn't exceed max size
+    if (queue.length >= MAX_QUEUE_SIZE) {
+      // Remove oldest events
+      queue.splice(0, queue.length - MAX_QUEUE_SIZE + 1);
+    }
+    
+    queue.push(event);
+    this.saveQueue(sessionId, queue);
+  }
+  
+  // Process events in the queue
+  private async processQueue(): Promise<void> {
+    if (!this.initialized || !this.currentSessionId || this.processingQueue) {
       return;
     }
     
-    this.processing = true;
+    this.processingQueue = true;
+    const sessionId = this.currentSessionId;
+    const queue = this.loadQueue(sessionId);
     
-    while (this.queue.length > 0) {
-      const event = this.queue[0];
-      
-      try {
-        await this.sendAuditEvent(event, token);
-        
-        // Remove the successfully processed event
-        this.queue.shift();
-        this.saveQueue(event.sessionId);
-      } catch (error) {
-        console.error('Failed to send audit event:', error);
-        
-        // Increment retry count
-        event.retryCount++;
-        
-        if (event.retryCount > this.maxRetries) {
-          // Remove event if max retries exceeded
-          this.queue.shift();
-        } else {
-          // Move to the end of the queue for retry
-          this.queue.shift();
-          this.queue.push(event);
-        }
-        
-        this.saveQueue(event.sessionId);
-        
-        // Wait before next retry
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      }
+    if (queue.length === 0) {
+      this.processingQueue = false;
+      return;
     }
     
-    this.processing = false;
+    try {
+      // Get token for authentication
+      const tokenString = localStorage.getItem('supabase.auth.token');
+      let token = '';
+      
+      if (tokenString) {
+        try {
+          const parsedToken = JSON.parse(tokenString);
+          if (parsedToken && parsedToken.access_token) {
+            token = parsedToken.access_token;
+          }
+        } catch (e) {
+          console.error('Failed to parse auth token from localStorage', e);
+          this.scheduleRetry();
+          return;
+        }
+      }
+      
+      if (!token) {
+        console.error('No authentication token available for audit events');
+        this.scheduleRetry();
+        return;
+      }
+      
+      // Process events in the queue
+      const event = queue[0];
+      await this.sendAuditEvent(event, token);
+      
+      // Remove the event from the queue on success
+      queue.shift();
+      this.saveQueue(sessionId, queue);
+      
+      // Continue processing queue if there are more events
+      if (queue.length > 0) {
+        setTimeout(() => {
+          this.processingQueue = false;
+          this.processQueue();
+        }, 100);
+      } else {
+        this.processingQueue = false;
+      }
+    } catch (error) {
+      // Handle failures
+      const event = queue[0];
+      event.retryCount++;
+      
+      if (event.retryCount > MAX_RETRY_COUNT) {
+        // Remove events that have exceeded retry count
+        queue.shift();
+      }
+      
+      this.saveQueue(sessionId, queue);
+      this.scheduleRetry();
+    }
+  }
+  
+  // Schedule a retry after the retry interval
+  private scheduleRetry(): void {
+    this.processingQueue = false;
+    
+    if (this.retryTimeoutId) {
+      clearTimeout(this.retryTimeoutId);
+    }
+    
+    this.retryTimeoutId = setTimeout(() => {
+      this.processQueue();
+    }, RETRY_INTERVAL);
   }
   
   // Send audit event to the service
   private async sendAuditEvent(event: QueuedAuditEvent, token: string): Promise<void> {
     try {
-      const response = await fetch(`${this.auditServiceUrl}/api/v1/events`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          sessionId: event.sessionId,
-          type: event.type,
-          details: event.details,
-          timestamp: new Date(event.timestamp).toISOString(),
-        }),
-      });
+      const response = await fetchWithAuthAndCors(
+        `${this.auditServiceUrl}/api/v1/events`, 
+        token,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            sessionId: event.sessionId,
+            type: event.type,
+            details: event.details,
+            timestamp: new Date(event.timestamp).toISOString(),
+          }),
+        }
+      );
       
       if (!response.ok) {
         // Handle specific error status codes
@@ -166,10 +239,5 @@ export class AuditQueueService {
       // Re-throw the error to be handled by the calling function
       throw error;
     }
-  }
-  
-  // Initialize queue from localStorage
-  public initializeForSession(sessionId: string): void {
-    this.loadQueue(sessionId);
   }
 } 

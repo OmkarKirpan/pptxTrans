@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Loader2, CheckCircle2, XCircle, Info } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { fetchWithCors, fetchWithAuthAndCors } from "@/lib/api/api-utils"
 
 export default function AuditIntegrationTestPage() {
   const [sessionId, setSessionId] = useState("test-integration")

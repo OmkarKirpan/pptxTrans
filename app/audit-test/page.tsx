@@ -13,6 +13,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useAuditLog } from '@/hooks/useAuditLog';
 import { Loader2 } from 'lucide-react';
 import Link from "next/link"
+import { fetchWithCors, fetchWithAuthAndCors } from '@/lib/api/api-utils';
 
 export default function AuditTestPage() {
   const supabase = createClient();
@@ -45,7 +46,7 @@ export default function AuditTestPage() {
   const checkHealth = async () => {
     setHealthStatus('Checking...');
     try {
-      const response = await fetch(`${serviceUrl}/health`);
+      const response = await fetchWithCors(`${serviceUrl}/health`);
       if (response.ok) {
         const data = await response.json();
         setHealthStatus(`✅ Service is running. Status: ${JSON.stringify(data)}`);
@@ -71,10 +72,9 @@ export default function AuditTestPage() {
           return;
         }
         
-        const response = await fetch(`${serviceUrl}/api/v1/events`, {
+        const response = await fetchWithAuthAndCors(`${serviceUrl}/api/v1/events`, token, {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({

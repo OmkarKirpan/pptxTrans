@@ -1,4 +1,5 @@
 import { AuditEntry, AuditResponse, AuditAction } from '@/types/audit';
+import { fetchWithAuthAndCors } from './api-utils';
 
 const AUDIT_SERVICE_URL = process.env.NEXT_PUBLIC_AUDIT_SERVICE_URL || 'http://localhost:4006';
 
@@ -19,11 +20,11 @@ export class AuditServiceClient {
   ): Promise<AuditResponse> {
     const offset = (page - 1) * limit;
     try {
-      const response = await fetch(
+      const response = await fetchWithAuthAndCors(
         `${AUDIT_SERVICE_URL}/api/v1/sessions/${sessionId}/history?limit=${limit}&offset=${offset}`,
+        this.token,
         {
           headers: {
-            'Authorization': `Bearer ${this.token}`,
             'Content-Type': 'application/json',
           },
         }
@@ -67,12 +68,12 @@ export class AuditServiceClient {
     details?: any
   ): Promise<void> {
     try {
-      const response = await fetch(
+      const response = await fetchWithAuthAndCors(
         `${AUDIT_SERVICE_URL}/api/v1/events`,
+        this.token,
         {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${this.token}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
