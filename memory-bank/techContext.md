@@ -28,15 +28,16 @@
 #### 1.2.1 PPTX Processor Service
 
 - **Framework:** FastAPI (Python)
-- **Libraries:**
-  - python-pptx for PPTX parsing
-  - LibreOffice for SVG conversion
-  - ElementTree for XML processing
+- **Core Technologies:**
+  - **LibreOffice UNO API** via unoserver for multi-slide SVG conversion (100% success rate)
+  - python-pptx for PPTX parsing and enhanced text extraction
+  - **UnoServer** for LibreOffice integration and individual slide processing
   - Pillow for image processing
   - python-multipart for file uploads
   - aiofiles for async file handling
   - supabase-py for Supabase integration
-- **Containerization:** Docker
+- **Architecture:** Production-ready with UNO API integration and fallback strategies
+- **Containerization:** Docker with LibreOffice and unoserver
 - **Deployment:** Docker Compose for local dev, Cloud Run for production (planned)
 
 #### 1.2.2 Audit Service

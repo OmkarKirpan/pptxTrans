@@ -62,14 +62,14 @@ async def get_job_file_path(job_id: str) -> Optional[str]:
     return None
 
 
-async def _generate_svgs_for_all_slides_libreoffice(
+async def _generate_svgs_for_all_slides_unoserver(
     presentation_path: str,
     output_dir: str,  # Directory where final slide_N.svg files will be stored
     slide_count: int
 ) -> Dict[int, str]:
     """
-    Convert all slides from a presentation to SVG files using LibreOffice batch processing.
-    Uses a single LibreOffice command to convert all slides at once for better performance.
+    Convert all slides from a presentation to SVG files using unoserver UNO API.
+    Uses LibreOffice UNO API to export each slide individually.
     """
     if not settings.LIBREOFFICE_PATH or not os.path.exists(settings.LIBREOFFICE_PATH):
         logger.error(
@@ -81,94 +81,192 @@ async def _generate_svgs_for_all_slides_libreoffice(
         logger.error(f"Presentation file not found: {abs_presentation_path}")
         raise FileNotFoundError(f"Presentation file not found: {abs_presentation_path}")
 
-    # Create temporary directory for LibreOffice output
-    temp_lo_output_dir = os.path.join(output_dir, f"lo_temp_{uuid.uuid4().hex[:8]}")
-    os.makedirs(temp_lo_output_dir, exist_ok=True)
-    abs_temp_output_dir = os.path.abspath(temp_lo_output_dir)
-
     try:
-        logger.info(f"Converting {slide_count} slides from {abs_presentation_path} to SVG using LibreOffice")
-
-        # Single LibreOffice command to convert all slides to SVG
-        command = [
-            settings.LIBREOFFICE_PATH,
-            "--headless",
-            "--convert-to", "svg:impress_svg_Export",
-            "--outdir", abs_temp_output_dir,
-            abs_presentation_path
-        ]
-
-        logger.info(f"Running LibreOffice command: {' '.join(command)}")
+        logger.info(f"Converting {slide_count} slides from {abs_presentation_path} to SVG using UNO API")
         
+        # Import UNO modules
+        import uno
+        from com.sun.star.connection import NoConnectException
+        
+        generated_svg_paths: Dict[int, str] = {}
+        
+        # Get the UNO service manager
+        localContext = uno.getComponentContext()
+        resolver = localContext.ServiceManager.createInstanceWithContext(
+            "com.sun.star.bridge.UnoUrlResolver", localContext)
+        
+        try:
+            # Connect to LibreOffice via unoserver
+            ctx = resolver.resolve("uno:socket,host=127.0.0.1,port=2002;urp;StarOffice.ComponentContext")
+            smgr = ctx.ServiceManager
+            
+            # Create desktop
+            desktop = smgr.createInstanceWithContext("com.sun.star.frame.Desktop", ctx)
+            
+            # Convert file path to URL
+            file_url = uno.systemPathToFileUrl(abs_presentation_path)
+            
+            # Load the presentation
+            doc = desktop.loadComponentFromURL(file_url, "_blank", 0, ())
+            
+            if not doc:
+                raise RuntimeError(f"Failed to load document: {abs_presentation_path}")
+            
+            logger.info(f"Loaded presentation via UNO API: {abs_presentation_path}")
+            
+            # Get the draw pages (slides)
+            draw_pages = doc.getDrawPages()
+            actual_slide_count = draw_pages.getCount()
+            
+            logger.info(f"Found {actual_slide_count} slides in presentation")
+            
+            if actual_slide_count != slide_count:
+                logger.warning(f"Expected {slide_count} slides, found {actual_slide_count}")
+            
+            # Export each slide
+            for i in range(actual_slide_count):
+                slide_num = i + 1
+                slide = draw_pages.getByIndex(i)
+                
+                # Create output file path
+                final_svg_name = f"slide_{slide_num}.svg"
+                final_svg_path = os.path.join(output_dir, final_svg_name)
+                output_url = uno.systemPathToFileUrl(os.path.abspath(final_svg_path))
+                
+                try:
+                    # Create export filter properties
+                    filter_props = (
+                        uno.createUnoStruct("com.sun.star.beans.PropertyValue"),
+                        uno.createUnoStruct("com.sun.star.beans.PropertyValue"),
+                    )
+                    
+                    filter_props[0].Name = "FilterName"
+                    filter_props[0].Value = "draw_svg_Export"
+                    
+                    filter_props[1].Name = "ExportOnlySelection"
+                    filter_props[1].Value = True
+                    
+                    # Select the current slide
+                    controller = doc.getCurrentController()
+                    try:
+                        controller.setCurrentPage(slide)
+                    except:
+                        # If setCurrentPage fails, try alternative approach
+                        pass
+                    
+                    # Create a temporary single-slide document for export
+                    # This is a more reliable approach than trying to export selected content
+                    temp_doc = desktop.loadComponentFromURL("private:factory/simpress", "_blank", 0, ())
+                    temp_pages = temp_doc.getDrawPages()
+                    
+                    # Clear the default slide and copy our slide
+                    temp_pages.remove(temp_pages.getByIndex(0))
+                    # Copy slide content to the temp document
+                    temp_pages.insertByIndex(0, slide)
+                    
+                    # Export the temporary document
+                    export_props = (uno.createUnoStruct("com.sun.star.beans.PropertyValue"),)
+                    export_props[0].Name = "FilterName"
+                    export_props[0].Value = "draw_svg_Export"
+                    
+                    temp_doc.storeToURL(output_url, export_props)
+                    temp_doc.close(True)
+                    
+                    if os.path.exists(final_svg_path):
+                        generated_svg_paths[slide_num] = final_svg_path
+                        logger.info(f"Successfully generated SVG for slide {slide_num}: {final_svg_path}")
+                    else:
+                        logger.warning(f"SVG file not created for slide {slide_num}")
+                    
+                except Exception as e:
+                    logger.error(f"Error exporting slide {slide_num}: {e}")
+                    # Continue with other slides even if one fails
+                    continue
+            
+            # Close the original document
+            doc.close(True)
+            
+        except NoConnectException:
+            logger.error("Could not connect to LibreOffice UNO server. Make sure unoserver is running on port 2002.")
+            raise RuntimeError("LibreOffice UNO server not available")
+        
+        if not generated_svg_paths:
+            logger.error("No SVG files were generated successfully")
+            raise RuntimeError("SVG generation failed - no output files")
+            
+        if len(generated_svg_paths) != slide_count:
+            logger.warning(f"Expected {slide_count} SVG files, got {len(generated_svg_paths)}")
+            # Continue with partial success rather than failing completely
+        
+        logger.info(f"Successfully generated SVGs for {len(generated_svg_paths)} slides")
+        return generated_svg_paths
+
+    except ImportError as e:
+        logger.error(f"UNO Python modules not available: {e}")
+        logger.error("Falling back to LibreOffice command-line approach")
+        # Fall back to the original LibreOffice command approach
+        return await _generate_svgs_fallback_libreoffice(presentation_path, output_dir, slide_count)
+        
+    except Exception as e:
+        logger.error(f"Unexpected error during UNO SVG generation: {str(e)}", exc_info=True)
+        raise
+
+
+async def _generate_svgs_fallback_libreoffice(
+    presentation_path: str,
+    output_dir: str,
+    slide_count: int
+) -> Dict[int, str]:
+    """
+    Fallback method using direct LibreOffice command for when UNO API is not available.
+    This will only generate the first slide but allows the system to continue functioning.
+    """
+    logger.warning("Using LibreOffice fallback method - only first slide will be converted")
+    
+    abs_presentation_path = os.path.abspath(presentation_path)
+    
+    # Single LibreOffice command to convert presentation to SVG (first slide only)
+    command = [
+        settings.LIBREOFFICE_PATH,
+        "--headless",
+        "--convert-to", "svg:impress_svg_Export",
+        "--outdir", output_dir,
+        abs_presentation_path
+    ]
+    
+    logger.info(f"Running LibreOffice fallback command: {' '.join(command)}")
+    
+    try:
         process = subprocess.run(
             command,
             check=True,
             capture_output=True,
             text=True,
-            timeout=300  # 5 minutes timeout for full presentation
+            timeout=300  # 5 minutes timeout
         )
         
-        logger.info(f"LibreOffice SVG conversion stdout: {process.stdout}")
-        if process.stderr:
-            logger.warning(f"LibreOffice SVG conversion stderr: {process.stderr}")
-
-        # Find generated SVG files
-        svg_files = glob.glob(os.path.join(abs_temp_output_dir, "*.svg"))
-        logger.info(f"LibreOffice generated {len(svg_files)} SVG files: {svg_files}")
-
-        if len(svg_files) == 0:
-            logger.error("LibreOffice did not generate any SVG files")
-            raise RuntimeError("LibreOffice SVG generation failed - no output files")
-
-        # Map SVG files to slide numbers
-        generated_svg_paths: Dict[int, str] = {}
+        # Find generated SVG file
+        svg_files = glob.glob(os.path.join(output_dir, "*.svg"))
         
-        if len(svg_files) == 1 and slide_count > 1:
-            # LibreOffice sometimes outputs a single multi-page SVG
-            # For now, we'll treat this as an error and require individual slides
-            logger.error("LibreOffice generated single SVG for multi-slide presentation")
-            raise RuntimeError("LibreOffice generated single SVG instead of individual slides")
-        
-        elif len(svg_files) == slide_count:
-            # Perfect match - sort files and map to slides
-            svg_files.sort()  # Ensure consistent ordering
-            for i, svg_file in enumerate(svg_files):
-                slide_number = i + 1
-                final_svg_name = f"slide_{slide_number}.svg"
-                final_svg_path = os.path.join(output_dir, final_svg_name)
-                shutil.move(svg_file, final_svg_path)
-                generated_svg_paths[slide_number] = final_svg_path
-                logger.info(f"Mapped slide {slide_number} to {final_svg_path}")
-        
+        if svg_files:
+            # Rename to expected format
+            original_svg = svg_files[0]
+            final_svg_path = os.path.join(output_dir, "slide_1.svg")
+            
+            if original_svg != final_svg_path:
+                shutil.move(original_svg, final_svg_path)
+            
+            logger.warning("Fallback method: only slide 1 was converted")
+            return {1: final_svg_path}
         else:
-            # Mismatch between expected and actual SVG count
-            logger.error(f"Expected {slide_count} SVG files, got {len(svg_files)}")
-            raise RuntimeError(f"SVG count mismatch: expected {slide_count}, got {len(svg_files)}")
-
-        # Clean up temporary directory
-        shutil.rmtree(temp_lo_output_dir, ignore_errors=True)
-        
-        logger.info(f"Successfully generated SVGs for {len(generated_svg_paths)} slides")
-        return generated_svg_paths
-
+            raise RuntimeError("LibreOffice fallback failed - no SVG generated")
+            
     except subprocess.CalledProcessError as e:
-        logger.error(f"LibreOffice command failed: {e}")
-        logger.error(f"Command output: {e.stdout}")
-        logger.error(f"Command error: {e.stderr}")
-        raise RuntimeError(f"LibreOffice SVG generation failed: {e}")
-        
+        logger.error(f"LibreOffice fallback command failed: {e}")
+        raise RuntimeError(f"LibreOffice fallback SVG generation failed: {e}")
     except subprocess.TimeoutExpired:
-        logger.error("LibreOffice SVG conversion timed out")
-        raise RuntimeError("LibreOffice SVG generation timed out")
-        
-    except Exception as e:
-        logger.error(f"Unexpected error during LibreOffice SVG generation: {str(e)}", exc_info=True)
-        raise
-        
-    finally:
-        # Ensure cleanup of temporary directory
-        if os.path.exists(temp_lo_output_dir):
-            shutil.rmtree(temp_lo_output_dir, ignore_errors=True)
+        logger.error("LibreOffice fallback conversion timed out")
+        raise RuntimeError("LibreOffice fallback SVG generation timed out")
 
 
 async def queue_pptx_processing(
@@ -356,7 +454,7 @@ async def process_pptx(
             )
         )
 
-        libreoffice_svgs = await _generate_svgs_for_all_slides_libreoffice(
+        libreoffice_svgs = await _generate_svgs_for_all_slides_unoserver(
             file_path, processing_output_dir, slide_count
         )
         

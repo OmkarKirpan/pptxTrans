@@ -1,1 +1,0 @@
-{"job_id":"7089e0e2-d9a7-440b-ba7a-abe219fe477c","session_id":"221022","status":"failed","progress":0,"current_stage":"Processing failed","message":null,"completed_at":null,"error":"Failed to upload file to Supabase: {'statusCode': 403, 'error': Unauthorized, 'message': new row violates row-level security policy}"}

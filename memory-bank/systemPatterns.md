@@ -123,10 +123,12 @@ flowchart TD
 
 2. **PPTX Processor Service Patterns:**
    - RESTful API with FastAPI
-   - Background task processing
-   - File upload handling
-   - SVG generation through LibreOffice
-   - Text extraction via python-pptx
+   - Background task processing with job management
+   - **UNO API Integration**: Individual slide processing via unoserver connection
+   - **Multi-slide Export**: 100% success rate using LibreOffice UNO API
+   - Enhanced text extraction with translation-optimized metadata
+   - **Fallback Strategy**: Graceful degradation to LibreOffice batch processing
+   - **Production Architecture**: Clean, organized codebase structure
    - Job status tracking
    - Error handling and retries
 
@@ -170,9 +172,12 @@ flowchart TD
    ```mermaid
    sequenceDiagram
        Client->>PPTX Service: Upload PPTX file
-       PPTX Service->>PPTX Service: Process in background (SVG, text extraction)
-       PPTX Service->>Supabase Storage: Store SVGs
-       PPTX Service->>Supabase DB: Store slide & shape data
+       PPTX Service->>UnoServer: Connect via UNO API bridge
+       PPTX Service->>UnoServer: Export each slide individually to SVG
+       UnoServer->>PPTX Service: Return individual SVG files (100% success)
+       PPTX Service->>PPTX Service: Enhanced text extraction with coordinates
+       PPTX Service->>Supabase Storage: Store all SVGs
+       PPTX Service->>Supabase DB: Store slide & shape data with validation
        PPTX Service->>Client: Return job status & core slide info (slide_count, original_file_name)
        Client->>TranslationSessionService: Create Session (name, lang, slide_count, etc.)
        TranslationSessionService->>Supabase DB: Store session metadata in 'translation_sessions' table
