@@ -11,7 +11,6 @@ from PIL import ImageDraw
 from PIL import ImageFont
 import json
 import shutil
-import xml.etree.ElementTree as ET
 from pptx.enum.text import PP_ALIGN, MSO_VERTICAL_ANCHOR
 from pptx.util import Emu, Pt
 import base64
@@ -19,6 +18,8 @@ from pptx.enum.shapes import MSO_SHAPE_TYPE
 import subprocess
 import tempfile
 import glob
+import xml.etree.ElementTree as ET
+import re
 
 from app.models.schemas import (
     ProcessedSlide,
@@ -366,7 +367,7 @@ async def process_slide_simplified(
 ) -> ProcessedSlide:
     """
     Process a single slide using simplified LibreOffice-only approach.
-    Enhanced text extraction optimized for translation workflows.
+    Enhanced text extraction optimized for translation workflows with coordinate validation.
     """
     slide_id = str(uuid.uuid4())
 
@@ -377,6 +378,28 @@ async def process_slide_simplified(
 
     # Enhanced text extraction optimized for translation
     extracted_shapes_data = extract_shapes_enhanced(slide, slide_width_emu, slide_height_emu)
+
+    # Validate and cross-reference coordinates with LibreOffice SVG
+    validated_shapes_data = await validate_coordinates_with_svg(
+        extracted_shapes_data, svg_path, slide_width_emu, slide_height_emu
+    )
+
+    # Add text segmentation for translation-ready units
+    for shape in validated_shapes_data:
+        if shape.shape_type == ShapeType.TEXT and shape.original_text:
+            # Segment text for better translation workflow
+            text_segments = segment_text_for_translation(shape.original_text, max_segment_length=150)
+            
+            # Add segmentation metadata to shape
+            shape_dict = shape.dict()
+            shape_dict.update({
+                'text_segments': text_segments,
+                'segment_count': len(text_segments),
+                'is_segmented': len(text_segments) > 1
+            })
+            
+            # Update the shape with new metadata
+            validated_shapes_data[validated_shapes_data.index(shape)] = SlideShape(**shape_dict)
 
     # Upload LibreOffice SVG to Supabase
     svg_url = await upload_file_to_supabase(
@@ -390,7 +413,7 @@ async def process_slide_simplified(
     if generate_thumbnail:
         thumbnail_file = f"{svg_path}_thumbnail.png"
         create_thumbnail_from_slide_enhanced(
-            slide, extracted_shapes_data, thumbnail_file, slide_width_emu, slide_height_emu
+            slide, validated_shapes_data, thumbnail_file, slide_width_emu, slide_height_emu
         )
         
         if os.path.exists(thumbnail_file):
@@ -580,7 +603,13 @@ def extract_shapes_enhanced(slide, slide_width_emu: int, slide_height_emu: int) 
                 "text_length": text_length,
                 "word_count": word_count,
                 "translation_priority": translation_priority,
-                "placeholder_type": placeholder_type
+                "placeholder_type": placeholder_type,
+                # Initialize coordinate validation fields
+                "coordinate_validation_score": None,
+                "svg_matched": None,
+                "svg_original_x": None,
+                "svg_original_y": None,
+                "coordinate_source": "pptx_extraction"
             })
             
             shapes_data.append(SlideShape(**shape_obj_data))
@@ -594,7 +623,13 @@ def extract_shapes_enhanced(slide, slide_width_emu: int, slide_height_emu: int) 
                     "is_subtitle": False,
                     "text_length": 0,
                     "word_count": 0,
-                    "translation_priority": 1  # Low priority for images
+                    "translation_priority": 1,  # Low priority for images
+                    # Initialize coordinate validation fields for images
+                    "coordinate_validation_score": None,
+                    "svg_matched": None,
+                    "svg_original_x": None,
+                    "svg_original_y": None,
+                    "coordinate_source": "pptx_extraction"
                 })
                 shapes_data.append(SlideShape(**shape_obj_data))
             except Exception as e:
@@ -706,3 +741,565 @@ def create_thumbnail_from_slide_enhanced(
         # Create a simple fallback thumbnail
         fallback = Image.new('RGB', (thumbnail_width_px, thumbnail_height_px), 'white')
         fallback.save(file_path, 'PNG')
+
+
+async def validate_coordinates_with_svg(
+    shapes_data: List[SlideShape],
+    svg_path: str,
+    slide_width_emu: int,
+    slide_height_emu: int
+) -> List[SlideShape]:
+    """
+    Enhanced cross-reference validation of extracted coordinates against LibreOffice SVG output.
+    Provides more accurate coordinate mapping and better text matching for translation workflows.
+    """
+    if not os.path.exists(svg_path):
+        logger.warning(f"SVG file not found for coordinate validation: {svg_path}")
+        # Mark all shapes as unvalidated but with source information
+        return _mark_shapes_as_unvalidated(shapes_data, "svg_file_missing")
+
+    try:
+        # Parse the LibreOffice-generated SVG with namespace handling
+        tree = ET.parse(svg_path)
+        root = tree.getroot()
+        
+        # Handle SVG namespace prefixes
+        namespaces = {'svg': 'http://www.w3.org/2000/svg'}
+        if root.tag.startswith('{'):
+            # Extract namespace from root tag
+            namespace = root.tag.split('}')[0][1:]
+            namespaces['svg'] = namespace
+
+        # Enhanced SVG dimension parsing
+        svg_info = _extract_svg_dimensions(root)
+        
+        # Calculate coordinate transformation factors
+        EMU_PER_INCH = 914400
+        DPI = 96
+        
+        # Original slide dimensions in pixels
+        slide_width_px = int((slide_width_emu / EMU_PER_INCH) * DPI)
+        slide_height_px = int((slide_height_emu / EMU_PER_INCH) * DPI)
+        
+        # Calculate more accurate scaling factors
+        transform_info = _calculate_coordinate_transform(
+            svg_info, slide_width_px, slide_height_px
+        )
+        
+        logger.info(f"SVG validation transform: slide({slide_width_px}x{slide_height_px}) -> "
+                   f"svg({svg_info['width']}x{svg_info['height']}), "
+                   f"scale({transform_info['scale_x']:.4f}, {transform_info['scale_y']:.4f})")
+
+        # Enhanced text element extraction from SVG
+        svg_text_elements = _extract_svg_text_elements(root, namespaces)
+        
+        logger.info(f"Found {len(svg_text_elements)} text elements in SVG for validation")
+
+        # Cross-reference and validate coordinates with enhanced matching
+        validated_shapes = []
+        validation_stats = {'exact_matches': 0, 'fuzzy_matches': 0, 'no_matches': 0}
+        
+        for shape in shapes_data:
+            if shape.shape_type != ShapeType.TEXT or not shape.original_text:
+                # Non-text shapes get minimal validation metadata
+                shape_dict = shape.dict()
+                shape_dict.update({
+                    'coordinate_validation_score': None,
+                    'svg_matched': False,
+                    'coordinate_source': 'pptx_extraction'
+                })
+                validated_shapes.append(SlideShape(**shape_dict))
+                continue
+
+            # Enhanced text matching with multiple strategies
+            match_result = _find_best_svg_text_match(shape.original_text, svg_text_elements)
+            
+            if match_result['score'] > 0.0:
+                # Apply coordinate transformation and validation
+                validated_shape = _apply_coordinate_validation(
+                    shape, match_result, transform_info
+                )
+                validated_shapes.append(validated_shape)
+                
+                # Update statistics
+                if match_result['score'] >= 0.95:
+                    validation_stats['exact_matches'] += 1
+                else:
+                    validation_stats['fuzzy_matches'] += 1
+                    
+                logger.debug(f"Validated coordinates for text '{shape.original_text[:30]}...': "
+                           f"({shape.x_coordinate}, {shape.y_coordinate}) -> "
+                           f"({validated_shape.x_coordinate}, {validated_shape.y_coordinate}), "
+                           f"score: {match_result['score']:.3f}")
+            else:
+                # No match found - keep original coordinates but mark as unvalidated
+                shape_dict = shape.dict()
+                shape_dict.update({
+                    'coordinate_validation_score': 0.0,
+                    'svg_matched': False,
+                    'coordinate_source': 'pptx_extraction',
+                    'svg_original_x': None,
+                    'svg_original_y': None
+                })
+                validated_shapes.append(SlideShape(**shape_dict))
+                validation_stats['no_matches'] += 1
+
+        # Log validation summary
+        total_text_shapes = validation_stats['exact_matches'] + validation_stats['fuzzy_matches'] + validation_stats['no_matches']
+        if total_text_shapes > 0:
+            match_rate = (validation_stats['exact_matches'] + validation_stats['fuzzy_matches']) / total_text_shapes * 100
+            logger.info(f"SVG validation summary: {total_text_shapes} text shapes, "
+                       f"{validation_stats['exact_matches']} exact, "
+                       f"{validation_stats['fuzzy_matches']} fuzzy, "
+                       f"{validation_stats['no_matches']} unmatched, "
+                       f"{match_rate:.1f}% match rate")
+
+        return validated_shapes
+
+    except Exception as e:
+        logger.warning(f"Error during coordinate validation: {str(e)}", exc_info=True)
+        # Return original shapes with error metadata
+        return _mark_shapes_as_unvalidated(shapes_data, f"validation_error: {str(e)}")
+
+
+def _mark_shapes_as_unvalidated(shapes_data: List[SlideShape], reason: str) -> List[SlideShape]:
+    """Mark all shapes as unvalidated with error information."""
+    validated_shapes = []
+    for shape in shapes_data:
+        shape_dict = shape.dict()
+        shape_dict.update({
+            'coordinate_validation_score': None,
+            'svg_matched': False,
+            'coordinate_source': f'pptx_extraction_only ({reason})',
+            'svg_original_x': None,
+            'svg_original_y': None
+        })
+        validated_shapes.append(SlideShape(**shape_dict))
+    return validated_shapes
+
+
+def _extract_svg_dimensions(root) -> Dict[str, Any]:
+    """Extract SVG dimensions with better parsing of units and viewBox."""
+    svg_info = {
+        'width': None,
+        'height': None,
+        'viewbox': None,
+        'units': 'px'
+    }
+    
+    # Get SVG dimensions
+    width_attr = root.get('width', '')
+    height_attr = root.get('height', '')
+    viewbox_attr = root.get('viewBox', '')
+    
+    # Parse dimensions with unit detection
+    if width_attr and height_attr:
+        try:
+            # Extract numeric value and unit
+            width_match = re.match(r'([\d.]+)(\w*)', width_attr.strip())
+            height_match = re.match(r'([\d.]+)(\w*)', height_attr.strip())
+            
+            if width_match and height_match:
+                svg_info['width'] = float(width_match.group(1))
+                svg_info['height'] = float(height_match.group(1))
+                
+                # Detect units (pt, px, mm, cm, in)
+                unit = width_match.group(2) or 'px'
+                svg_info['units'] = unit
+                
+                # Convert to pixels if needed
+                if unit == 'pt':
+                    svg_info['width'] = svg_info['width'] * 96 / 72  # Points to pixels
+                    svg_info['height'] = svg_info['height'] * 96 / 72
+                elif unit == 'mm':
+                    svg_info['width'] = svg_info['width'] * 96 / 25.4  # MM to pixels
+                    svg_info['height'] = svg_info['height'] * 96 / 25.4
+                elif unit == 'cm':
+                    svg_info['width'] = svg_info['width'] * 96 / 2.54  # CM to pixels
+                    svg_info['height'] = svg_info['height'] * 96 / 2.54
+                elif unit == 'in':
+                    svg_info['width'] = svg_info['width'] * 96  # Inches to pixels
+                    svg_info['height'] = svg_info['height'] * 96
+        except Exception as e:
+            logger.debug(f"Error parsing SVG dimensions: {e}")
+    
+    # Parse viewBox if available and dimensions are missing
+    if viewbox_attr:
+        try:
+            viewbox_parts = viewbox_attr.split()
+            if len(viewbox_parts) == 4:
+                viewbox = [float(x) for x in viewbox_parts]
+                svg_info['viewbox'] = viewbox
+                
+                if not svg_info['width'] or not svg_info['height']:
+                    svg_info['width'] = viewbox[2] - viewbox[0]
+                    svg_info['height'] = viewbox[3] - viewbox[1]
+        except Exception as e:
+            logger.debug(f"Error parsing SVG viewBox: {e}")
+    
+    return svg_info
+
+
+def _calculate_coordinate_transform(svg_info: Dict[str, Any], slide_width_px: int, slide_height_px: int) -> Dict[str, float]:
+    """Calculate coordinate transformation factors with better accuracy."""
+    transform_info = {
+        'scale_x': 1.0,
+        'scale_y': 1.0,
+        'offset_x': 0.0,
+        'offset_y': 0.0,
+        'needs_transform': False
+    }
+    
+    if svg_info['width'] and svg_info['height']:
+        transform_info['scale_x'] = svg_info['width'] / slide_width_px
+        transform_info['scale_y'] = svg_info['height'] / slide_height_px
+        
+        # Check if transformation is needed (with small tolerance for floating point errors)
+        if abs(transform_info['scale_x'] - 1.0) > 0.001 or abs(transform_info['scale_y'] - 1.0) > 0.001:
+            transform_info['needs_transform'] = True
+        
+        # Handle viewBox offset if present
+        if svg_info['viewbox']:
+            transform_info['offset_x'] = svg_info['viewbox'][0]
+            transform_info['offset_y'] = svg_info['viewbox'][1]
+    
+    return transform_info
+
+
+def _extract_svg_text_elements(root, namespaces: Dict[str, str]) -> List[Dict[str, Any]]:
+    """Enhanced text element extraction from SVG with better text parsing."""
+    svg_text_elements = []
+    
+    # Look for various text elements that LibreOffice might generate
+    text_selectors = [
+        'text',
+        'tspan',
+        './/text',
+        './/tspan',
+        './/{http://www.w3.org/2000/svg}text',
+        './/{http://www.w3.org/2000/svg}tspan'
+    ]
+    
+    processed_texts = set()  # Avoid duplicates
+    
+    for selector in text_selectors:
+        try:
+            if selector.startswith('.//'):
+                elements = root.findall(selector)
+            else:
+                elements = root.iter(selector)
+            
+            for text_elem in elements:
+                text_content = _extract_text_content(text_elem)
+                if not text_content or text_content in processed_texts:
+                    continue
+                
+                processed_texts.add(text_content)
+                
+                # Extract position attributes with better parsing
+                position_data = _extract_text_position(text_elem)
+                if position_data:
+                    svg_text_elements.append({
+                        'text': text_content,
+                        'x': position_data['x'],
+                        'y': position_data['y'],
+                        'width': position_data.get('width'),
+                        'height': position_data.get('height'),
+                        'element': text_elem,
+                        'style': _extract_text_style(text_elem)
+                    })
+                    
+        except Exception as e:
+            logger.debug(f"Error processing text selector {selector}: {e}")
+            continue
+    
+    return svg_text_elements
+
+
+def _extract_text_content(text_elem) -> str:
+    """Extract complete text content from SVG text element including nested tspans."""
+    text_parts = []
+    
+    # Get direct text content
+    if text_elem.text:
+        text_parts.append(text_elem.text.strip())
+    
+    # Get text from nested elements (tspan, etc.)
+    for child in text_elem:
+        if child.text:
+            text_parts.append(child.text.strip())
+        if child.tail:
+            text_parts.append(child.tail.strip())
+    
+    # Get tail text
+    if text_elem.tail:
+        text_parts.append(text_elem.tail.strip())
+    
+    return ' '.join(filter(None, text_parts)).strip()
+
+
+def _extract_text_position(text_elem) -> Optional[Dict[str, float]]:
+    """Extract position and size information from SVG text element."""
+    try:
+        # Extract x, y coordinates
+        x_attr = text_elem.get('x', '0')
+        y_attr = text_elem.get('y', '0')
+        
+        # Handle comma-separated or space-separated coordinates
+        x_vals = re.findall(r'[\d.-]+', x_attr)
+        y_vals = re.findall(r'[\d.-]+', y_attr)
+        
+        if not x_vals or not y_vals:
+            return None
+        
+        x_val = float(x_vals[0])
+        y_val = float(y_vals[0])
+        
+        position_data = {'x': x_val, 'y': y_val}
+        
+        # Try to extract width and height if available
+        width_attr = text_elem.get('width')
+        height_attr = text_elem.get('height')
+        
+        if width_attr:
+            width_vals = re.findall(r'[\d.-]+', width_attr)
+            if width_vals:
+                position_data['width'] = float(width_vals[0])
+        
+        if height_attr:
+            height_vals = re.findall(r'[\d.-]+', height_attr)
+            if height_vals:
+                position_data['height'] = float(height_vals[0])
+        
+        return position_data
+        
+    except Exception as e:
+        logger.debug(f"Error extracting text position: {e}")
+        return None
+
+
+def _extract_text_style(text_elem) -> Dict[str, str]:
+    """Extract style information from SVG text element."""
+    style_info = {}
+    
+    # Get style attribute
+    style_attr = text_elem.get('style', '')
+    if style_attr:
+        # Parse CSS-style properties
+        for prop in style_attr.split(';'):
+            if ':' in prop:
+                key, value = prop.split(':', 1)
+                style_info[key.strip()] = value.strip()
+    
+    # Get individual style attributes
+    for attr in ['font-family', 'font-size', 'font-weight', 'fill', 'text-anchor']:
+        value = text_elem.get(attr)
+        if value:
+            style_info[attr] = value
+    
+    return style_info
+
+
+def _find_best_svg_text_match(shape_text: str, svg_text_elements: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Enhanced text matching with multiple strategies and scoring."""
+    if not shape_text or not svg_text_elements:
+        return {'score': 0.0, 'match': None, 'strategy': 'no_candidates'}
+    
+    shape_text_clean = shape_text.strip()
+    best_match = None
+    best_score = 0.0
+    best_strategy = 'no_match'
+    
+    for svg_text in svg_text_elements:
+        svg_text_clean = svg_text['text'].strip()
+        
+        # Strategy 1: Exact match
+        if shape_text_clean == svg_text_clean:
+            return {
+                'score': 1.0,
+                'match': svg_text,
+                'strategy': 'exact_match'
+            }
+        
+        # Strategy 2: Case-insensitive exact match
+        if shape_text_clean.lower() == svg_text_clean.lower():
+            if 0.98 > best_score:
+                best_match = svg_text
+                best_score = 0.98
+                best_strategy = 'case_insensitive_exact'
+        
+        # Strategy 3: Normalized whitespace match
+        shape_normalized = re.sub(r'\s+', ' ', shape_text_clean)
+        svg_normalized = re.sub(r'\s+', ' ', svg_text_clean)
+        if shape_normalized == svg_normalized:
+            if 0.95 > best_score:
+                best_match = svg_text
+                best_score = 0.95
+                best_strategy = 'normalized_whitespace'
+        
+        # Strategy 4: Substring matching
+        if shape_text_clean in svg_text_clean or svg_text_clean in shape_text_clean:
+            # Calculate overlap ratio
+            longer_text = shape_text_clean if len(shape_text_clean) > len(svg_text_clean) else svg_text_clean
+            shorter_text = svg_text_clean if len(shape_text_clean) > len(svg_text_clean) else shape_text_clean
+            
+            overlap_score = len(shorter_text) / len(longer_text) * 0.9  # Penalty for partial match
+            if overlap_score > best_score and overlap_score > 0.7:
+                best_match = svg_text
+                best_score = overlap_score
+                best_strategy = 'substring_match'
+        
+        # Strategy 5: Word-based similarity
+        shape_words = set(shape_text_clean.lower().split())
+        svg_words = set(svg_text_clean.lower().split())
+        
+        if shape_words and svg_words:
+            common_words = shape_words & svg_words
+            total_words = shape_words | svg_words
+            word_similarity = len(common_words) / len(total_words) * 0.85  # Penalty for word-based match
+            
+            if word_similarity > best_score and word_similarity > 0.6:
+                best_match = svg_text
+                best_score = word_similarity
+                best_strategy = 'word_similarity'
+        
+        # Strategy 6: Character-based similarity (Jaccard-like)
+        if len(shape_text_clean) > 5 and len(svg_text_clean) > 5:  # Only for longer texts
+            shape_chars = set(shape_text_clean.lower())
+            svg_chars = set(svg_text_clean.lower())
+            
+            common_chars = shape_chars & svg_chars
+            total_chars = shape_chars | svg_chars
+            
+            if total_chars:
+                char_similarity = len(common_chars) / len(total_chars) * 0.75  # Lower weight for char similarity
+                
+                if char_similarity > best_score and char_similarity > 0.5:
+                    best_match = svg_text
+                    best_score = char_similarity
+                    best_strategy = 'character_similarity'
+    
+    return {
+        'score': best_score,
+        'match': best_match,
+        'strategy': best_strategy
+    }
+
+
+def _apply_coordinate_validation(
+    shape: SlideShape,
+    match_result: Dict[str, Any],
+    transform_info: Dict[str, float]
+) -> SlideShape:
+    """Apply coordinate validation and transformation based on SVG match."""
+    svg_text = match_result['match']
+    
+    # Store original SVG coordinates
+    svg_original_x = svg_text['x']
+    svg_original_y = svg_text['y']
+    
+    # Apply coordinate transformation if needed
+    if transform_info['needs_transform']:
+        # Transform SVG coordinates back to slide coordinate space
+        adjusted_x = int((svg_original_x - transform_info['offset_x']) / transform_info['scale_x'])
+        adjusted_y = int((svg_original_y - transform_info['offset_y']) / transform_info['scale_y'])
+    else:
+        # Use SVG coordinates directly
+        adjusted_x = int(svg_original_x)
+        adjusted_y = int(svg_original_y)
+    
+    # Create updated shape with validated coordinates and metadata
+    shape_dict = shape.dict()
+    shape_dict.update({
+        'x_coordinate': adjusted_x,
+        'y_coordinate': adjusted_y,
+        'coordinate_validation_score': match_result['score'],
+        'svg_matched': True,
+        'svg_original_x': svg_original_x,
+        'svg_original_y': svg_original_y,
+        'coordinate_source': f"svg_validation ({match_result['strategy']})"
+    })
+    
+    return SlideShape(**shape_dict)
+
+
+def segment_text_for_translation(text: str, max_segment_length: int = 100) -> List[Dict[str, Any]]:
+    """
+    Segment text into translation-friendly units.
+    Breaks text at sentence boundaries while respecting length limits.
+    """
+    if not text or len(text.strip()) == 0:
+        return []
+
+    text = text.strip()
+    
+    # If text is short enough, return as single segment
+    if len(text) <= max_segment_length:
+        return [{
+            'text': text,
+            'segment_index': 0,
+            'is_complete_sentence': True,
+            'word_count': len(text.split()),
+            'char_count': len(text)
+        }]
+
+    segments = []
+    
+    # Split by sentence boundaries
+    sentence_endings = r'[.!?]+\s+'
+    sentences = re.split(sentence_endings, text)
+    
+    current_segment = ""
+    segment_index = 0
+    
+    for i, sentence in enumerate(sentences):
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+            
+        # If adding this sentence would exceed limit, save current segment
+        if current_segment and len(current_segment + " " + sentence) > max_segment_length:
+            if current_segment:
+                segments.append({
+                    'text': current_segment.strip(),
+                    'segment_index': segment_index,
+                    'is_complete_sentence': True,
+                    'word_count': len(current_segment.split()),
+                    'char_count': len(current_segment)
+                })
+                segment_index += 1
+                current_segment = sentence
+            else:
+                # Single sentence is too long, break it at word boundaries
+                words = sentence.split()
+                temp_segment = ""
+                
+                for word in words:
+                    if temp_segment and len(temp_segment + " " + word) > max_segment_length:
+                        segments.append({
+                            'text': temp_segment.strip(),
+                            'segment_index': segment_index,
+                            'is_complete_sentence': False,
+                            'word_count': len(temp_segment.split()),
+                            'char_count': len(temp_segment)
+                        })
+                        segment_index += 1
+                        temp_segment = word
+                    else:
+                        temp_segment = temp_segment + " " + word if temp_segment else word
+                
+                current_segment = temp_segment
+        else:
+            current_segment = current_segment + " " + sentence if current_segment else sentence
+
+    # Add final segment
+    if current_segment:
+        segments.append({
+            'text': current_segment.strip(),
+            'segment_index': segment_index,
+            'is_complete_sentence': True,
+            'word_count': len(current_segment.split()),
+            'char_count': len(current_segment)
+        })
+
+    return segments

@@ -78,6 +78,40 @@ class SlideShape(BaseModel):
         None, description="Reading order of the text element (1-based)")
     parent_id: Optional[str] = Field(
         None, description="ID of the parent shape (for grouped elements)")
+    
+    # Translation-optimized metadata fields
+    is_title: Optional[bool] = Field(
+        False, description="Whether this shape is identified as a title")
+    is_subtitle: Optional[bool] = Field(
+        False, description="Whether this shape is identified as a subtitle")
+    text_length: Optional[int] = Field(
+        None, description="Length of the text content in characters")
+    word_count: Optional[int] = Field(
+        None, description="Number of words in the text content")
+    translation_priority: Optional[int] = Field(
+        None, ge=1, le=10, description="Translation priority (1-10, higher is more important)")
+    placeholder_type: Optional[str] = Field(
+        None, description="PowerPoint placeholder type (e.g., TITLE, SUBTITLE, BODY)")
+    
+    # Coordinate validation metadata fields
+    coordinate_validation_score: Optional[float] = Field(
+        None, ge=0.0, le=1.0, description="Confidence score for coordinate validation (0.0-1.0)")
+    svg_matched: Optional[bool] = Field(
+        None, description="Whether this shape was successfully matched with SVG text element")
+    svg_original_x: Optional[float] = Field(
+        None, description="Original X coordinate from SVG before transformation")
+    svg_original_y: Optional[float] = Field(
+        None, description="Original Y coordinate from SVG before transformation")
+    coordinate_source: Optional[str] = Field(
+        None, description="Source of coordinates (pptx_extraction, svg_validation, manual_adjustment)")
+    
+    # Text segmentation metadata for translation
+    text_segments: Optional[List[Dict[str, Any]]] = Field(
+        None, description="Segmented text units for translation workflow")
+    segment_count: Optional[int] = Field(
+        None, description="Number of text segments")
+    is_segmented: Optional[bool] = Field(
+        None, description="Whether the text has been segmented for translation")
 
     @validator("shape_id", pre=True, always=True)
     def set_shape_id(cls, v):

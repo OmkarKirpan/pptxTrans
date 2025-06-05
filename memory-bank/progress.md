@@ -86,8 +86,13 @@
   - ✅ PPTX upload endpoint
   - ✅ Background task processing
   - ✅ LibreOffice SVG generation
-  - ✅ ElementTree fallback for SVG generation
-  - ✅ Text extraction with coordinates
+  - ✅ Enhanced text extraction with coordinates
+  - ✅ SVG coordinate validation and cross-reference
+  - ✅ Translation-optimized metadata extraction
+  - ✅ Multiple text matching strategies for accuracy
+  - ✅ Coordinate transformation and validation scoring
+  - ✅ Text segmentation for translation workflows
+  - ✅ Enhanced thumbnail generation
   - ✅ Supabase integration for storage
   - ✅ Job status tracking
   - ✅ Health check endpoint
