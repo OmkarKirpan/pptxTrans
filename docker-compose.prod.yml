@@ -6,16 +6,18 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        - NODE_ENV=production
     container_name: pptxtransed-frontend
     ports:
       - "3000:3000"
     environment:
-      - NODE_ENV=development
+      - NODE_ENV=production
       - NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL}
       - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
-      - NEXT_PUBLIC_AUDIT_SERVICE_URL=http://audit-service:4006
-      - NEXT_PUBLIC_PPTX_PROCESSOR_URL=http://pptx-processor:8000
-      - NEXT_PUBLIC_SHARE_SERVICE_URL=http://share-service:3001
+      - NEXT_PUBLIC_AUDIT_SERVICE_URL=${AUDIT_SERVICE_URL:-http://audit-service:4006}
+      - NEXT_PUBLIC_PPTX_PROCESSOR_URL=${PPTX_PROCESSOR_URL:-http://pptx-processor:8000}
+      - NEXT_PUBLIC_SHARE_SERVICE_URL=${SHARE_SERVICE_URL:-http://share-service:3001}
     depends_on:
       audit-service:
         condition: service_healthy
@@ -26,20 +28,33 @@ services:
     networks:
       - pptxtransed-network
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   # Audit Service (Go)
   audit-service:
     build:
       context: ./services/audit-service
       dockerfile: Dockerfile
+      args:
+        - GO_ENV=production
     container_name: pptxtransed-audit-service
     ports:
       - "4006:4006"
     environment:
       - PORT=4006
-      - LOG_LEVEL=debug
-      - JWT_SECRET=${JWT_SECRET:-local-development-secret-key}
-      - CORS_ORIGIN=http://localhost:3000
+      - LOG_LEVEL=info
+      - JWT_SECRET=${JWT_SECRET}
+      - CORS_ORIGIN=${CORS_ORIGIN:-https://yourdomain.com}
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
       - SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET}
@@ -55,6 +70,11 @@ services:
     networks:
       - pptxtransed-network
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
     healthcheck:
       test:
         [
@@ -80,10 +100,10 @@ services:
       - "8000:8000"
     environment:
       # API Configuration
-      - API_ENV=${NODE_ENV:-development}
+      - API_ENV=production
       - API_PORT=8000
       - API_HOST=0.0.0.0
-      - LOG_LEVEL=debug
+      - LOG_LEVEL=info
       # LibreOffice Configuration
       - LIBREOFFICE_PATH=/usr/bin/soffice
       # Processing Configuration
@@ -93,13 +113,18 @@ services:
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_KEY=${SUPABASE_ANON_KEY}
       # CORS Configuration
-      - CORS_ORIGIN=http://localhost:3000
+      - CORS_ORIGIN=${CORS_ORIGIN:-https://yourdomain.com}
     volumes:
       - pptx_uploads:/tmp/uploads
       - pptx_processing:/tmp/processing
     networks:
       - pptxtransed-network
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/v1/health"]
       interval: 30s
@@ -117,14 +142,25 @@ services:
       - "3001:3001"
     environment:
       - PORT=3001
-      - NODE_ENV=development
-      - CORS_ORIGIN=http://localhost:3000
+      - NODE_ENV=production
+      - CORS_ORIGIN=${CORS_ORIGIN:-https://yourdomain.com}
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_KEY=${SUPABASE_ANON_KEY}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
     networks:
       - pptxtransed-network
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
 networks:
   pptxtransed-network:

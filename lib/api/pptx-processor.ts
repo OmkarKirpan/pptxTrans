@@ -1,6 +1,6 @@
 import { ProcessingResponse } from '@/types/pptx-processor';
 
-const PPTX_PROCESSOR_URL = process.env.NEXT_PUBLIC_PPTX_PROCESSOR_URL || 'http://localhost:3001';
+const PPTX_PROCESSOR_URL = process.env.NEXT_PUBLIC_PPTX_PROCESSOR_URL || 'http://localhost:8000';
 
 export class PptxProcessorClient {
   private token: string;
@@ -35,7 +35,7 @@ export class PptxProcessorClient {
       formData.append('generate_thumbnails', String(generateThumbnails));
       
       const response = await fetch(
-        `${PPTX_PROCESSOR_URL}/api/process`,
+        `${PPTX_PROCESSOR_URL}/v1/process`,
         {
           method: 'POST',
           headers: this.token ? {
@@ -81,7 +81,7 @@ export class PptxProcessorClient {
   async getProcessingStatus(jobId: string): Promise<ProcessingResponse> {
     try {
       const response = await fetch(
-        `${PPTX_PROCESSOR_URL}/api/status/${jobId}`,
+        `${PPTX_PROCESSOR_URL}/v1/status/${jobId}`,
         {
           headers: this.token ? {
             'Authorization': `Bearer ${this.token}`,
@@ -125,7 +125,7 @@ export class PptxProcessorClient {
   async getProcessingResults(sessionId: string): Promise<any> {
     try {
       const response = await fetch(
-        `${PPTX_PROCESSOR_URL}/api/results/${sessionId}`,
+        `${PPTX_PROCESSOR_URL}/v1/results/${sessionId}`,
         {
           headers: this.token ? {
             'Authorization': `Bearer ${this.token}`,
@@ -160,6 +160,28 @@ export class PptxProcessorClient {
       
       // Re-throw the error to be handled by the calling function
       throw error;
+    }
+  }
+
+  /**
+   * Check if the PPTX processor service is available
+   */
+  async checkHealth(): Promise<boolean> {
+    try {
+      const response = await fetch(
+        `${PPTX_PROCESSOR_URL}/v1/health`,
+        {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+      
+      return response.ok;
+    } catch (error) {
+      console.error('PPTX processor health check failed:', error);
+      return false;
     }
   }
 } 

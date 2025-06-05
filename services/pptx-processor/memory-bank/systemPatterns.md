@@ -124,6 +124,17 @@ sequenceDiagram
 - **Containerized Environment**: LibreOffice pre-installed and configured for headless operation
 - **Consistent Deployment**: Same environment from development to production
 - **Linux Optimization**: Leveraging Linux-based LibreOffice for better reliability
+- **Multi-stage Build**: Separation of build and runtime environments for efficiency
+- **Security First**: Non-root user, minimized dependencies, proper permissions
+- **Resource Management**: Configurable limits for CPU and memory
+
+### Production Docker Deployment
+- **Environment Isolation**: Clear separation between development and production environments
+- **Health Monitoring**: Comprehensive health checks for container monitoring
+- **Volume Management**: Persistent volumes with proper naming and permissions
+- **Service Orchestration**: Dependency management with health-based startup conditions
+- **Resource Control**: Fine-grained resource limits for optimal performance
+- **Security Enhancements**: Non-root user, minimized attack surface
 
 ### Configuration-Driven Behavior
 - **LibreOffice Configuration**: Optimized command-line arguments for best SVG output
@@ -134,6 +145,8 @@ sequenceDiagram
 - **Slidecanvas Compatibility**: API responses designed specifically for frontend slidecanvas component
 - **Translation Focus**: All metadata structured for optimal translation experience
 - **Coordinate System**: Consistent coordinate system between LibreOffice SVG and extracted text
+- **Client-Side Handling**: Comprehensive error handling and status polling in client code
+- **Status Reporting**: Detailed progress and stage information for UI updates
 
 ## Removed Patterns (Simplified Architecture)
 
@@ -181,12 +194,17 @@ sequenceDiagram
 - **Metadata Structure**: Response format optimized for slidecanvas component needs
 - **Translation Workflow**: Data structure supports efficient translation interface
 - **Real-time Updates**: API designed for responsive frontend integration
+- **Client Library**: TypeScript client with comprehensive error handling
+- **Status Polling**: Efficient status checking with exponential backoff
 
 ### Docker Deployment
 - **LibreOffice Pre-installation**: Container includes properly configured LibreOffice
-- **Environment Variables**: All configuration via environment for easy deployment
+- **Environment Variables**: All configuration via environment variables for easy deployment
 - **Resource Management**: Proper resource limits and timeout configurations
 - **Health Checks**: Container health validation including LibreOffice availability
+- **Multi-Stage Build**: Efficient build process with separated build and runtime environments
+- **Security Best Practices**: Non-root user, minimized dependencies, proper permissions
+- **Volume Management**: Persistent volumes with clear naming and organization
 
 ## Code Quality Patterns
 
@@ -209,10 +227,26 @@ app/services/
 - **Mock Support**: Modules can be mocked for isolated testing
 - **Coverage**: Easier to achieve comprehensive test coverage
 
+### Deployment Architecture
+```mermaid
+graph TD
+    A[Client Application] --> B[Docker Host]
+    B --> C[Docker Network]
+    C --> D[Frontend Container]
+    C --> E[PPTX Processor Container]
+    C --> F[Supabase Integration]
+    E --> G[Volume: pptx_uploads]
+    E --> H[Volume: pptx_processing]
+    E --> I[LibreOffice Process]
+```
+
 ## Future Extensibility
 - **Module Enhancement**: Each module can be enhanced independently
 - **Performance Optimization**: Parallel processing opportunities within modular approach
 - **Feature Addition**: New capabilities can be added as separate modules
 - **Translation Integration**: Direct integration with translation services via dedicated modules
+- **Horizontal Scaling**: Multiple service instances behind load balancer
+- **Advanced Monitoring**: Integration with Prometheus and Grafana
+- **Translation Memory**: Add translation memory capabilities for efficiency
 
-The modular architecture provides a solid foundation for maintainable, testable, and extensible PPTX processing capabilities. 
+The modular architecture provides a solid foundation for maintainable, testable, and extensible PPTX processing capabilities with production-ready deployment configurations. 
