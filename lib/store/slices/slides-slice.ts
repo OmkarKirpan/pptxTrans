@@ -160,6 +160,7 @@ export const createSlidesSlice: StateCreator<SlidesState> = (set, get) => ({
       syncStatus: {
         ...state.syncStatus,
         isSyncing: true,
+        error: null, // Clear previous errors
       }
     }))
 
@@ -204,13 +205,30 @@ export const createSlidesSlice: StateCreator<SlidesState> = (set, get) => ({
     } catch (error) {
       console.error('Error updating shape:', error)
       
-      // Set error status and revert the optimistic update if needed
+      // Set error status and revert the optimistic update
       set(state => ({
         syncStatus: {
           isSyncing: false,
           lastSynced: state.syncStatus.lastSynced,
           error: error instanceof Error ? error.message : 'Failed to update shape'
-        }
+        },
+        // Revert the optimistic update by removing the pending flag
+        slides: state.slides.map(slide => {
+          if (slide.id === slideId) {
+            return {
+              ...slide,
+              shapes: slide.shapes.map(shape => {
+                if (shape.id === shapeId && (shape as any)._pendingUpdate) {
+                  // Remove the pending flag to indicate the update failed
+                  const { _pendingUpdate, ...originalShape } = shape as any;
+                  return originalShape;
+                }
+                return shape
+              })
+            }
+          }
+          return slide
+        })
       }))
     }
   },

@@ -17,6 +17,90 @@ We use Zustand for centralized state management with a modular slice-based appro
   - `comments-slice.ts`: Comments per shape with loading states
   - `notifications-slice.ts`: Comment notifications and unread counts
   - `merge-slice.ts`: Shape selection for merge operations
+  - `share-slice.ts`: Session sharing functionality
+  - `translation-sessions-slice.ts`: Translation session management
+  - `migration-slice.ts`: Schema migration handling
+  - `network-slice.ts`: Online/offline state tracking
+  - `offline-queue-slice.ts`: Queue for offline operations
+  - `subscription-slice.ts`: Selective subscription management
+- **`migrations/`**: Directory containing schema migration files
+- **`utils/`**: Utility functions for network listeners and subscription management
+
+## Enhanced Features
+
+### Schema Migration Strategy
+The store now includes a comprehensive migration system to handle schema changes:
+
+```tsx
+import { useMigration } from '@/lib/store'
+
+function MyComponent() {
+  const { currentVersion, registerMigration } = useMigration()
+  
+  // Register a migration
+  registerMigration({
+    version: 2,
+    up: (state) => ({
+      ...state,
+      // Apply migration logic
+    })
+  })
+}
+```
+
+### Error State Handling
+All async operations now include comprehensive error handling:
+
+```tsx
+import { useSlides } from '@/lib/store'
+
+function SlideEditor() {
+  const { syncStatus, updateShape } = useSlides()
+  
+  // syncStatus includes error information
+  if (syncStatus.error) {
+    return <div>Error: {syncStatus.error}</div>
+  }
+}
+```
+
+### Offline Queue
+Operations are automatically queued when offline and processed when connectivity is restored:
+
+```tsx
+import { useOfflineQueue, useNetwork } from '@/lib/store'
+
+function OfflineIndicator() {
+  const { isOnline } = useNetwork()
+  const { operations } = useOfflineQueue()
+  
+  if (!isOnline && operations.length > 0) {
+    return <div>{operations.length} operations queued</div>
+  }
+}
+```
+
+### Selective Subscriptions
+Real-time subscriptions can be managed selectively for better performance:
+
+```tsx
+import { useSubscription } from '@/lib/store'
+import { subscribeToSlideUpdates } from '@/lib/store/utils/subscription-manager'
+
+function SlideEditor({ sessionId }) {
+  const { activeSubscriptions } = useSubscription()
+  
+  useEffect(() => {
+    subscribeToSlideUpdates(
+      sessionId,
+      (slideUpdate) => console.log('Slide updated:', slideUpdate),
+      (shapeUpdate) => console.log('Shape updated:', shapeUpdate)
+    )
+    
+    return () => unsubscribeFromSlideUpdates(sessionId)
+  }, [sessionId])
+}
+```
 
 ## Usage
 
@@ -41,11 +125,33 @@ For better performance and code organization, use the domain-specific hooks:
 import { useSession, useSlides, useEditBuffers } from '@/lib/store'
 
 function EditorComponent() {
-  const { currentSession } = useSession()
+  const { userRole } = useSession()
   const { slides, currentSlide, setCurrentSlide } = useSlides()
   const { createBuffer, updateBuffer, saveBuffer } = useEditBuffers()
   
   // ...
+}
+```
+
+### Enhanced Hooks
+
+New hooks for accessing enhanced functionality:
+
+```tsx
+import { 
+  useMigration, 
+  useNetwork, 
+  useOfflineQueue, 
+  useSubscription 
+} from '@/lib/store'
+
+function AppStatus() {
+  const { currentVersion } = useMigration()
+  const { isOnline } = useNetwork()
+  const { operations } = useOfflineQueue()
+  const { activeSubscriptions } = useSubscription()
+  
+  // Display app status information
 }
 ```
 
@@ -69,7 +175,36 @@ function ShapeComponent({ shapeId, slideId }) {
 
 ## State Persistence
 
-(Coming soon) The store will support persistence for certain slices to enable offline usage and restore application state between sessions.
+The store supports persistence with automatic migration handling:
+
+- **Version Tracking**: Each persisted state includes a version number
+- **Migration on Hydration**: Migrations are automatically applied when loading persisted state
+- **Selective Persistence**: Only relevant state is persisted to localStorage
+- **Network Recovery**: Network listeners are restored on app startup
+
+## Initialization
+
+To properly initialize all enhanced features, call the setup functions in your app:
+
+```tsx
+// In your main app component or _app.tsx
+import { registerMigrations } from '@/lib/store/migrations'
+import { initializeNetworkListeners } from '@/lib/store/utils/network-listeners'
+
+function App() {
+  useEffect(() => {
+    // Register all migrations
+    registerMigrations()
+    
+    // Set up network listeners
+    const cleanup = initializeNetworkListeners()
+    
+    return cleanup
+  }, [])
+  
+  // ...
+}
+```
 
 ## Development
 
@@ -81,10 +216,19 @@ function ShapeComponent({ shapeId, slideId }) {
 4. Add your slice to the main store in `index.ts`
 5. Create custom hooks for accessing your slice
 
+### Creating Migrations
+
+1. Create a new migration file in `migrations/` with version number
+2. Implement the `up` function to transform the state
+3. Register the migration in `migrations/index.ts`
+4. Test the migration with different state scenarios
+
 ### Best Practices
 
 - Use selectors to access only the state you need
 - Keep actions co-located with their respective state
 - Use TypeScript for type safety
 - Avoid using the store for ephemeral UI state (use local state instead)
-- Consider implementing middleware for side effects or persistence 
+- Implement error handling for all async operations
+- Use selective subscriptions to optimize performance
+- Test migrations thoroughly before deployment 

@@ -10,6 +10,10 @@ import { createNotificationsSlice } from './slices/notifications-slice'
 import { createMergeSlice } from './slices/merge-slice'
 import { createShareSlice } from './slices/share-slice'
 import { createTranslationSessionsSlice, type TranslationSessionsSlice } from './slices/translationSessionsSlice'
+import { createMigrationSlice } from './slices/migration-slice'
+import { createNetworkSlice } from './slices/network-slice'
+import { createOfflineQueueSlice } from './slices/offline-queue-slice'
+import { createSubscriptionSlice } from './slices/subscription-slice'
 
 // The AppStore type from ./types already includes all slices including the new share slice.
 // No need for ExtendedAppStore if AppStore is comprehensive.
@@ -23,47 +27,90 @@ import { createTranslationSessionsSlice, type TranslationSessionsSlice } from '.
 export const useAppStore = create<AppStore>()(
   devtools(
     persist(
-      (...a) => ({
-        // Session slice
-        ...createSessionSlice(...a),
+      (...a) => {
+        // Create slices
+        const migrationSlice = createMigrationSlice(...a);
+        const sessionSlice = createSessionSlice(...a);
+        const slidesSlice = createSlidesSlice(...a);
+        const editBuffersSlice = createEditBuffersSlice(...a);
+        const commentsSlice = createCommentsSlice(...a);
+        const notificationsSlice = createNotificationsSlice(...a);
+        const mergeSlice = createMergeSlice(...a);
+        const shareSlice = createShareSlice(...a);
+        const translationSessionsSlice = createTranslationSessionsSlice(...a);
+        const networkSlice = createNetworkSlice(...a);
+        const offlineQueueSlice = createOfflineQueueSlice(...a);
+        const subscriptionSlice = createSubscriptionSlice(...a);
         
-        // Slides slice
-        ...createSlidesSlice(...a),
-        
-        // Edit buffers slice
-        ...createEditBuffersSlice(...a),
-        
-        // Comments slice
-        ...createCommentsSlice(...a),
-        
-        // Notifications slice
-        ...createNotificationsSlice(...a),
-        
-        // Merge slice
-        ...createMergeSlice(...a),
-        
-        // Share slice
-        ...createShareSlice(...a),
-        
-        // Translation Sessions slice (NEW)
-        ...createTranslationSessionsSlice(...a),
-      }),
+        // Combine all slices
+        return {
+          // Migration slice (must be first to ensure migrations are available)
+          ...migrationSlice,
+          
+          // Session slice
+          ...sessionSlice,
+          
+          // Slides slice
+          ...slidesSlice,
+          
+          // Edit buffers slice
+          ...editBuffersSlice,
+          
+          // Comments slice
+          ...commentsSlice,
+          
+          // Notifications slice
+          ...notificationsSlice,
+          
+          // Merge slice
+          ...mergeSlice,
+          
+          // Share slice
+          ...shareSlice,
+          
+          // Translation Sessions slice
+          ...translationSessionsSlice,
+          
+          // Network slice
+          ...networkSlice,
+          
+          // Offline queue slice
+          ...offlineQueueSlice,
+          
+          // Subscription slice
+          ...subscriptionSlice,
+        };
+      },
       {
         name: 'pptx-translator-storage',
+        version: 1, // Add version for migration tracking
         partialize: (state) => ({
+          // Store version for migrations
+          version: state.currentVersion,
+          
           // Session slice parts
           userRole: state.userRole,
           shareToken: state.shareToken,
+          
           // Slides slice parts
           slides: state.slides,
           currentSlideId: state.currentSlideId,
+          
           // Edit buffers slice parts
           buffers: state.buffers,
-          // Share slice parts (Update this part)
-          sessionShares: state.sessionShares, // Persist sessionShares from the new ShareSliceState
+          
+          // Share slice parts
+          sessionShares: state.sessionShares,
+          
           // Translation sessions parts
           sessions: state.sessions,
           paginatedSessions: state.paginatedSessions,
+          
+          // Offline queue
+          operations: state.operations,
+          
+          // Subscriptions
+          activeSubscriptions: state.activeSubscriptions,
         }),
         // Use localStorage for persistence (survives browser restarts)
         storage: typeof window !== 'undefined' ? {
@@ -76,6 +123,23 @@ export const useAppStore = create<AppStore>()(
           },
           removeItem: (name) => localStorage.removeItem(name),
         } : undefined,
+        // Add onRehydrateStorage for migration handling
+        onRehydrateStorage: () => (state) => {
+          if (state) {
+            console.log('Store rehydrated');
+            
+            // Restore online listeners
+            if (typeof window !== 'undefined') {
+              window.addEventListener('online', () => state.setOnline(true));
+              window.addEventListener('offline', () => state.setOnline(false));
+              
+              // Process any pending operations if we're online
+              if (navigator.onLine && state.operations?.length > 0) {
+                state.processQueue();
+              }
+            }
+          }
+        },
       }
     ),
     {
@@ -92,30 +156,18 @@ export const useAppStore = create<AppStore>()(
 // Session slice hooks
 export const useSession = () => {
   const { 
-    // currentSession, // Removed
     userRole, 
-    shareToken, 
-    // isLoading, // Removed
-    // error, // Removed
-    // setSession, // Removed
-    setUserRole, // Added
+    shareToken,
+    setUserRole,
     setShareToken,
-    // setLoading, // Removed
-    // setError, // Removed
     clearSession 
   } = useAppStore()
   
   return {
-    // currentSession, // Removed
     userRole,
     shareToken,
-    // isLoading, // Removed
-    // error, // Removed
-    // setSession, // Removed
-    setUserRole, // Added
+    setUserRole,
     setShareToken,
-    // setLoading, // Removed
-    // setError, // Removed
     clearSession
   }
 }
@@ -274,7 +326,7 @@ export const useMergeSelection = (slideId?: string) => {
   }
 }
 
-// Share slice hooks (REPLACE existing useShare hook)
+// Share slice hooks
 export const useShare = () => {
   const {
     sessionShares,
@@ -282,7 +334,7 @@ export const useShare = () => {
     isLoadingSessionShares,
     isLoadingRevoke,
     errorCreate,
-    errorSessionShares,
+    errorList: errorSessionShares,
     errorRevoke,
     createShare,
     fetchShares,
@@ -307,7 +359,7 @@ export const useShare = () => {
   };
 }
 
-// Translation Sessions slice hooks (NEW)
+// Translation Sessions slice hooks
 export const useTranslationSessions = () => {
   const {
     sessions,
@@ -349,6 +401,72 @@ export const useTranslationSessions = () => {
     clearError,
     markSessionInProgress,
     markSessionCompleted
+  }
+}
+
+// New hooks for accessing the new slices
+
+// Migration slice hooks
+export const useMigration = () => {
+  const {
+    currentVersion,
+    migrations,
+    registerMigration,
+    migrateToLatest
+  } = useAppStore()
+  
+  return {
+    currentVersion,
+    migrations,
+    registerMigration,
+    migrateToLatest
+  }
+}
+
+// Network state hooks
+export const useNetwork = () => {
+  const {
+    isOnline,
+    setOnline
+  } = useAppStore()
+  
+  return {
+    isOnline,
+    setOnline
+  }
+}
+
+// Offline queue hooks
+export const useOfflineQueue = () => {
+  const {
+    operations,
+    addOperation,
+    removeOperation,
+    processQueue,
+    clearQueue
+  } = useAppStore()
+  
+  return {
+    operations,
+    addOperation,
+    removeOperation,
+    processQueue,
+    clearQueue
+  }
+}
+
+// Subscription hooks
+export const useSubscription = () => {
+  const {
+    activeSubscriptions,
+    toggleSubscription,
+    clearAllSubscriptions
+  } = useAppStore()
+  
+  return {
+    activeSubscriptions,
+    toggleSubscription,
+    clearAllSubscriptions
   }
 }
 

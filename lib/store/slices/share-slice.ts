@@ -6,16 +6,16 @@ import {
   CreatedShareInfo,
 } from '@/types/share';
 import {
-  createShareToken as apiCreateShareToken,
-  listShareTokens as apiListShareTokens,
-  revokeShareToken as apiRevokeShareToken,
+  createShare,
+  getMyShares,
+  deleteShare,
 } from '@/lib/api/shareApi';
 
 // Define the state structure for shares
 export interface ShareSliceState {
   sessionShares: Record<string, ShareRecord[]>; // sessionId -> shares array
   isLoadingCreate: boolean;
-  isLoadingList: Record<string, boolean>; // sessionId -> boolean
+  isLoadingSessionShares: Record<string, boolean>; // sessionId -> boolean, renamed from isLoadingList
   isLoadingRevoke: Record<string, boolean>; // shareTokenJti -> boolean
   errorCreate: string | null;
   errorList: Record<string, string | null>; // sessionId -> error message
@@ -42,7 +42,7 @@ export interface ShareSliceActions {
 const initialState: ShareSliceState = {
   sessionShares: {},
   isLoadingCreate: false,
-  isLoadingList: {},
+  isLoadingSessionShares: {}, // renamed from isLoadingList
   isLoadingRevoke: {},
   errorCreate: null,
   errorList: {},
@@ -63,13 +63,12 @@ export const createShareSlice: StateCreator<
       state.errorCreate = null;
     }));
     try {
-      const newShareInfo = await apiCreateShareToken(sessionId, permissions, expiresIn, name);
+      // Use the first permission in the array for now
+      // This could be enhanced to create multiple shares with different permissions
+      const permission = permissions.length > 0 ? permissions[0] : SharePermission.VIEW;
+      const newShareInfo = await createShare(sessionId, expiresIn, permission);
       set(produce((state: ShareSliceState) => {
         state.isLoadingCreate = false;
-        // We don't add to sessionShares here directly because the full ShareRecord isn't returned by create,
-        // only CreatedShareInfo. We should refetch or the share list should update via real-time if implemented.
-        // For now, we rely on a subsequent fetchShares or a UI refresh.
-        // Alternatively, construct a partial ShareRecord if absolutely necessary for optimistic updates.
       }));
       // After creating, refresh the list for that session to get the full new record
       await get().fetchShares(sessionId);
@@ -85,18 +84,22 @@ export const createShareSlice: StateCreator<
 
   fetchShares: async (sessionId) => {
     set(produce((state: ShareSliceState) => {
-      state.isLoadingList[sessionId] = true;
+      state.isLoadingSessionShares[sessionId] = true;
       state.errorList[sessionId] = null;
     }));
     try {
-      const shares = await apiListShareTokens(sessionId);
+      // For now, we'll use getMyShares and filter for the session
+      // Ideally, the API would have a getSharesForSession endpoint
+      const allShares = await getMyShares();
+      const sessionShares = allShares.filter(share => share.session_id === sessionId);
+      
       set(produce((state: ShareSliceState) => {
-        state.isLoadingList[sessionId] = false;
-        state.sessionShares[sessionId] = shares;
+        state.isLoadingSessionShares[sessionId] = false;
+        state.sessionShares[sessionId] = sessionShares;
       }));
     } catch (error: any) {
       set(produce((state: ShareSliceState) => {
-        state.isLoadingList[sessionId] = false;
+        state.isLoadingSessionShares[sessionId] = false;
         state.errorList[sessionId] = error.message || 'Failed to fetch shares.';
       }));
     }
@@ -108,7 +111,7 @@ export const createShareSlice: StateCreator<
       state.errorRevoke[shareTokenJti] = null;
     }));
     try {
-      await apiRevokeShareToken(shareTokenJti);
+      await deleteShare(shareTokenJti);
       set(produce((state: ShareSliceState) => {
         state.isLoadingRevoke[shareTokenJti] = false;
         if (state.sessionShares[sessionId]) {
@@ -128,7 +131,7 @@ export const createShareSlice: StateCreator<
   clearSharesForSession: (sessionId) => {
     set(produce((state: ShareSliceState) => {
       delete state.sessionShares[sessionId];
-      delete state.isLoadingList[sessionId];
+      delete state.isLoadingSessionShares[sessionId];
       delete state.errorList[sessionId];
     }));
   },

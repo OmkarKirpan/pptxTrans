@@ -8,6 +8,52 @@ import type { TranslationSessionsSlice } from './slices/translationSessionsSlice
 // User role in a session
 export type UserRole = 'owner' | 'reviewer' | 'viewer'
 
+// Migration interface for schema migrations
+export interface Migration {
+  version: number;
+  up: (state: any) => any;
+}
+
+// Migration state for tracking schema versions
+export interface MigrationState {
+  currentVersion: number;
+  migrations: Migration[];
+  registerMigration: (migration: Migration) => void;
+  migrateToLatest: (state: any) => any;
+}
+
+// Network state for connectivity tracking
+export interface NetworkState {
+  isOnline: boolean;
+  setOnline: (isOnline: boolean) => void;
+}
+
+// Operation queue for offline functionality
+export interface QueuedOperation {
+  id: string;
+  action: string;
+  params: any;
+  timestamp: number;
+  retryCount: number;
+  maxRetries: number;
+}
+
+// Queue state for offline operations
+export interface OfflineQueueState {
+  operations: QueuedOperation[];
+  addOperation: (action: string, params: any) => void;
+  removeOperation: (id: string) => void;
+  processQueue: () => Promise<void>;
+  clearQueue: () => void;
+}
+
+// Subscription state for selective subscriptions
+export interface SubscriptionState {
+  activeSubscriptions: Record<string, boolean>;
+  toggleSubscription: (channel: string, active: boolean) => void;
+  clearAllSubscriptions: () => void;
+}
+
 // Edit buffer for tracking text changes
 export interface EditBuffer {
   shapeId: string
@@ -173,5 +219,9 @@ export interface AppStore extends
   CommentsState,
   NotificationsState,
   MergeState,
-  CombinedShareSlice,
-  TranslationSessionsSlice {} 
+  Omit<CombinedShareSlice, 'isLoadingList'>,
+  TranslationSessionsSlice,
+  MigrationState,
+  NetworkState,
+  OfflineQueueState,
+  SubscriptionState {} 
