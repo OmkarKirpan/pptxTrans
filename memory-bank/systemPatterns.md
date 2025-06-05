@@ -66,7 +66,7 @@ flowchart TD
    - Shared components for common patterns
 
 3. **State Management with Zustand:**
-   - **Modular Slice Architecture:** (IMPLEMENTED)
+   - **Modular Slice Architecture:** (ENHANCED WITH ADVANCED FEATURES)
      - Separate store slices for different domains:
        - `session-slice.ts`: User session, roles, and permissions
        - `slides-slice.ts`: Slide data, current slide, and navigation
@@ -74,33 +74,49 @@ flowchart TD
        - `comments-slice.ts`: Comments on slides and shapes
        - `notifications-slice.ts`: System and comment notifications
        - `merge-slice.ts`: Merge operations and shape selection
+       - `share-slice.ts`: Session sharing functionality
+       - `translation-sessions-slice.ts`: Translation session management
+       - `migration-slice.ts`: Schema migration handling
+       - `network-slice.ts`: Online/offline state tracking
+       - `offline-queue-slice.ts`: Queue for offline operations
+       - `subscription-slice.ts`: Selective subscription management
      - Main store combines slices using Zustand's create function
    
    - **Store Structure:**
      ```
      lib/store/
      ├── index.ts            # Main store creation and exports
-     ├── README.md           # Documentation
+     ├── README.md           # Comprehensive documentation
      ├── types.ts            # Type definitions for all slices
-     └── slices/
-         ├── session-slice.ts
-         ├── slides-slice.ts
-         ├── edit-buffers-slice.ts
-         ├── comments-slice.ts
-         ├── notifications-slice.ts
-         └── merge-slice.ts
+     ├── slices/
+     │   ├── session-slice.ts
+     │   ├── slides-slice.ts
+     │   ├── edit-buffers-slice.ts
+     │   ├── comments-slice.ts
+     │   ├── notifications-slice.ts
+     │   ├── merge-slice.ts
+     │   ├── share-slice.ts
+     │   ├── translation-sessions-slice.ts
+     │   ├── migration-slice.ts
+     │   ├── network-slice.ts
+     │   ├── offline-queue-slice.ts
+     │   └── subscription-slice.ts
+     ├── migrations/
+     │   ├── index.ts        # Migration registry
+     │   └── v2-add-comment-color.ts # Example migration
+     └── utils/
+         ├── network-listeners.ts    # Network event setup
+         └── subscription-manager.ts # Subscription utilities
      ```
    
-   - **Store Integration:**
-     - Custom hooks for accessing store state (useAppStore, useSession, useSlides, etc.)
-     - Component integration using these hooks instead of local useState
-     - Selective component re-rendering using state selectors
-     - Middleware for devtools, persistence, and logging
-   
-   - **State Actions:**
-     - Actions co-located with state in each slice
-     - Consistent action naming: set*, update*, add*, remove*, toggle*, etc.
-     - Actions include validation and side effect handling
+   - **Enhanced Store Features:**
+     - **Schema Migration System**: Automatic migration handling for store structure changes
+     - **Comprehensive Error Handling**: Standardized error states across all slices
+     - **Offline Queue**: Automatic operation queueing during network outages
+     - **Selective Subscriptions**: Performance-optimized real-time updates (fully implemented, tested, and documented)
+     - **Network State Management**: Automatic online/offline detection
+     - **Persistence**: Enhanced localStorage persistence with migration support
+     - **Type Safety**: Comprehensive TypeScript definitions and conflict resolution
 
 4. **Form Management:**
    - React Hook Form for form state
@@ -239,27 +255,56 @@ flowchart TD
    - Slices combined into a single store
    - Custom hooks for accessing slices
 
-2. **Persistence Pattern (State Storage):**
-   - Using Zustand persist middleware
-   - Selective state persistence via partialize
-   - LocalStorage for cross-session survival
-   - Storage adapter pattern for different environments
+2. **Migration Pattern (Schema Evolution):**
+   - Version-based schema migration system
+   - Sequential migration execution with rollback protection
+   - Automatic migration detection and execution on store hydration
+   - Migration registry for centralized management
+   - Type-safe migration functions with error handling
 
-3. **Real-time Synchronization Pattern:**
+3. **Offline-First Pattern:**
+   - Automatic operation queueing during network outages
+   - FIFO processing of queued operations on reconnection
+   - Retry logic with exponential backoff
+   - Persistent queue storage across app restarts
+   - Network state detection with automatic recovery
+
+4. **Error Recovery Pattern:**
+   - Comprehensive error state tracking across all slices
+   - Optimistic update reversal on operation failure
+   - Standardized error handling with user-friendly messages
+   - Error boundary integration with store error states
+   - Automatic retry mechanisms for transient failures
+
+5. **Selective Subscription Pattern:**
+   - Dynamic subscription management for performance optimization (fully implemented, tested, and documented)
+   - Channel-specific subscription activation/deactivation
+   - Session-scoped subscriptions for multi-tenant environments
+   - Automatic cleanup to prevent memory leaks
+   - Filtered event handling for relevant updates only
+
+6. **Persistence Pattern (State Storage):**
+   - Using Zustand persist middleware with migration support
+   - Selective state persistence via partialize
+   - Version tracking for migration compatibility
+   - Storage adapter pattern for different environments
+   - Cross-session state survival with cleanup mechanisms
+
+7. **Real-time Synchronization Pattern:**
    - Supabase real-time channels for database changes
-   - Event-based subscription model
+   - Event-based subscription model with selective filtering
    - Channel management with lifecycle hooks
    - Handlers for different event types (INSERT, UPDATE, DELETE)
    - Component-level cleanup to prevent memory leaks
 
-4. **Optimistic Updates Pattern:**
+8. **Optimistic Updates Pattern:**
    - Immediate UI updates before server confirmation
    - Tracking pending/sync status with UI indicators
    - Error handling with fallback to previous state
    - Background server synchronization
    - Loading states with fallback UI
 
-5. **Drag-and-Drop Pattern:**
+9. **Drag-and-Drop Pattern:**
    - Using @hello-pangea/dnd for smooth drag interactions
    - Droppable context for drop targets
    - Draggable components for interactive elements
@@ -267,27 +312,27 @@ flowchart TD
    - Optimistic UI updates during drag operations
    - Server synchronization after reordering
 
-6. **Repository Pattern (Audit Service):**
-   - Abstracts data access logic
-   - Enables swapping implementations
-   - Centralizes query logic
+10. **Repository Pattern (Audit Service):**
+    - Abstracts data access logic
+    - Enables swapping implementations
+    - Centralizes query logic
 
-7. **Middleware Pattern (API Services):**
-   - Chainable request processing
-   - Cross-cutting concerns (auth, logging, error handling)
-   - Consistent request flow
+11. **Middleware Pattern (API Services):**
+    - Chainable request processing
+    - Cross-cutting concerns (auth, logging, error handling)
+    - Consistent request flow
 
-8. **Background Processing Pattern (PPTX Service):**
-   - Async task handling
-   - Job status tracking
-   - Retry mechanisms
+12. **Background Processing Pattern (PPTX Service):**
+    - Async task handling
+    - Job status tracking
+    - Retry mechanisms
 
-9. **Hybrid Rendering Pattern (Frontend):**
-   - SVG backgrounds from processed slides
-   - HTML overlays for interactive elements
-   - Position matching based on coordinates
+13. **Hybrid Rendering Pattern (Frontend):**
+    - SVG backgrounds from processed slides
+    - HTML overlays for interactive elements
+    - Position matching based on coordinates
 
-10. **Event Sourcing (Audit Logging):**
+14. **Event Sourcing (Audit Logging):**
     - Capturing all state-changing events
     - Reconstructing state from event log
     - Immutable event history

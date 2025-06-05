@@ -1,10 +1,10 @@
 # Active Context: PowerPoint Translator App
 
 ## 1. Current Work Focus
-The primary focus is shifting to enhancing and integrating the completed Zustand state management system, alongside the ongoing work on the full-stack solution for high-fidelity slide rendering and translation:
+The primary focus has shifted to enhanced frontend capabilities and backend service integration, with major state management enhancements now completed:
 
-1. **Frontend State Management (COMPLETED - STORE ENHANCEMENTS ADDED):**
-   - Implemented Zustand for centralized state management
+1. **Frontend State Management (COMPLETED - COMPREHENSIVE ENHANCEMENTS ADDED):**
+   - Implemented Zustand for centralized state management with full integration
    - Created modular store slices for different state domains:
      - SessionState: Managing current session, user role, share tokens
      - SlidesState: Managing slides array, current slide, and reordering functionality
@@ -12,11 +12,24 @@ The primary focus is shifting to enhancing and integrating the completed Zustand
      - CommentsState: Managing comments per shape (for future implementation)
      - NotificationsState: Managing comment notifications and unread counts
      - MergeState: Managing shape selection for merge operations
-   - Created main store file combining all slices
+     - ShareState: Managing session sharing functionality
+     - TranslationSessionsState: Managing translation session lifecycle
+     - MigrationState: Managing schema migrations for store evolution
+     - NetworkState: Managing online/offline connectivity status
+     - OfflineQueueState: Managing queued operations during offline periods
+     - SubscriptionState: Managing selective real-time subscriptions
+   - Created main store file combining all slices with enhanced middleware
    - Implemented custom hooks for accessing store state
-   - Added persistence middleware for offline support
-   - Implemented real-time Supabase synchronization service
+   - Added comprehensive persistence middleware for offline support
+   - Implemented real-time Supabase synchronization service with selective subscriptions
    - Added optimistic updates pattern for improved UX
+   - **NEW ENHANCEMENTS:**
+     - Schema migration system for handling store structure changes
+     - Comprehensive error handling with recovery mechanisms
+     - Offline operation queue with automatic retry logic
+     - Network state detection and automatic reconnection
+     - Selective subscription management for performance optimization (fully implemented, tested, and documented)
+     - Enhanced documentation with usage examples and best practices
 
 2. **PPTX Processor Service (PHASE 2 COMPLETED - ENHANCED TEXT EXTRACTION):** A Python FastAPI microservice for server-side PPTX processing
    - Converting slides to SVGs using LibreOffice batch processing
@@ -55,6 +68,44 @@ The primary focus is shifting to enhancing and integrating the completed Zustand
    - Modify the `UploadWizard` to create a session record in `translation_sessions` after PPTX processing.
 
 ## 2. Recent Changes & Accomplishments
+
+- **Advanced State Management Enhancements (COMPLETED):**
+  - **Schema Migration System:**
+    - Created comprehensive migration framework with version tracking
+    - Implemented migration slice (`migration-slice.ts`) with automatic migration execution
+    - Added example migration demonstrating comment color addition (`v2-add-comment-color.ts`)
+    - Integrated migration handling into persist middleware for seamless store evolution
+    - Created migration registry for centralized migration management
+  - **Comprehensive Error Handling:**
+    - Enhanced all async operations with standardized try-catch blocks
+    - Added error state tracking across all slices with detailed error messages
+    - Implemented error recovery mechanisms with optimistic update reversal
+    - Created consistent error state patterns with loading indicators
+    - Added global error handling with user-friendly error notifications
+  - **Offline Queue Implementation:**
+    - Created offline queue slice (`offline-queue-slice.ts`) with persistent operation storage
+    - Implemented automatic operation queueing when network is unavailable
+    - Added retry logic with configurable max retry attempts
+    - Created network detection slice (`network-slice.ts`) for connectivity monitoring
+    - Integrated automatic queue processing on network reconnection
+  - **Selective Subscription Management:**
+    - Implemented subscription slice (`subscription-slice.ts`) for channel management
+    - Created subscription manager utility with channel-specific controls
+    - Added dynamic subscription activation/deactivation for performance optimization
+    - Implemented filtered subscriptions for session-specific updates
+    - Created utilities for slide-specific subscription management with cleanup
+  - **Enhanced Store Architecture:**
+    - Updated main store to include all new slices with proper middleware integration
+    - Added comprehensive type safety with resolved type conflicts
+    - Created custom hooks for all new slices (useMigration, useNetwork, useOfflineQueue, useSubscription)
+    - Enhanced persistence configuration with version tracking and migration handling
+    - Added automatic network listener setup with cleanup on app initialization
+  - **Updated Documentation:**
+    - Completely revised store README with examples for all new features
+    - Added initialization guide for proper app setup
+    - Created comprehensive usage examples for all enhanced features
+    - Documented best practices for migrations, error handling, and subscriptions
+
 - **Upload Wizard Enhancement (COMPLETED):**
   - Fixed an issue where the "Create Translation Session" button in the configure step could be clicked multiple times if backend processing was slow.
   - Introduced `isProcessingSubmittedConfig` state in `upload-wizard.tsx` to disable the button throughout the entire session creation and PPTX processing flow.
