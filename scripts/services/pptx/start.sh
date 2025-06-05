@@ -17,19 +17,36 @@ echo "         PPTX Processor Service Launcher              "
 echo "======================================================"
 echo -e "${NC}"
 
+# Find the project root (where package.json is located)
+find_root() {
+  local current_dir="$PWD"
+  while [[ "$current_dir" != "/" ]]; do
+    if [[ -f "$current_dir/package.json" ]]; then
+      echo "$current_dir"
+      return 0
+    fi
+    current_dir="$(dirname "$current_dir")"
+  done
+  echo "$PWD"  # Fallback to current directory
+}
+
+# Get project root
+PROJECT_ROOT=$(find_root)
+PPTX_SERVICE_DIR="$PROJECT_ROOT/services/pptx-processor"
+
 # Check if the PPTX processor service directory exists
-if [ ! -d "services/pptx-processor" ]; then
-  echo -e "${RED}Error: services/pptx-processor directory not found!${NC}"
+if [ ! -d "$PPTX_SERVICE_DIR" ]; then
+  echo -e "${RED}Error: services/pptx-processor directory not found at $PPTX_SERVICE_DIR!${NC}"
   exit 1
 fi
 
 # Check if .env file already exists
-if [ ! -f "services/pptx-processor/.env" ]; then
+if [ ! -f "$PPTX_SERVICE_DIR/.env" ]; then
   # Create the .env file with required variables if it doesn't exist
   echo -e "${BLUE}Creating .env file with required variables...${NC}"
 
   # Create a .env file with required variables
-  cat > services/pptx-processor/.env << EOF
+  cat > "$PPTX_SERVICE_DIR/.env" << EOF
 PORT=3001
 LOG_LEVEL=debug
 CORS_ORIGIN=http://localhost:3000
@@ -38,14 +55,14 @@ PROCESSING_DIR=./processing
 EOF
 
   # Check if Supabase values are already in the file
-  if ! grep -q "SUPABASE_URL" services/pptx-processor/.env; then
+  if ! grep -q "SUPABASE_URL" "$PPTX_SERVICE_DIR/.env"; then
     # Supabase URL not found, add default values
-    cat >> services/pptx-processor/.env << EOF
+    cat >> "$PPTX_SERVICE_DIR/.env" << EOF
 SUPABASE_URL=https://your-project-id.supabase.co
 SUPABASE_KEY=your-supabase-anon-key
 EOF
     
-    echo -e "${YELLOW}Please update services/pptx-processor/.env with your actual Supabase credentials.${NC}"
+    echo -e "${YELLOW}Please update $PPTX_SERVICE_DIR/.env with your actual Supabase credentials.${NC}"
     echo "Press Ctrl+C to exit or any key to continue..."
     read -n 1 -s
   fi
@@ -54,11 +71,11 @@ else
 fi
 
 # Create necessary directories for uploads and processing
-mkdir -p services/pptx-processor/uploads
-mkdir -p services/pptx-processor/processing
+mkdir -p "$PPTX_SERVICE_DIR/uploads"
+mkdir -p "$PPTX_SERVICE_DIR/processing"
 
 # Navigate to the PPTX processor service directory
-cd services/pptx-processor
+cd "$PPTX_SERVICE_DIR"
 
 # Check if Python is installed
 if ! command -v python &> /dev/null; then
@@ -98,7 +115,7 @@ if [ -f "requirements.txt" ]; then
 fi
 
 # Run the service
-echo -e "${GREEN}Running PPTX processor service on port 3001...${NC}"
-uv python -m app.main
+echo -e "${GREEN}Running PPTX processor service on port 8000...${NC}"
+uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 # This script can be enhanced to include database setup, migrations, etc. 

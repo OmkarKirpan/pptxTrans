@@ -16,7 +16,8 @@ RUN apt-get update && apt-get install -y \
 # Install UV package manager
 RUN pip install --no-cache-dir uv
 
-# Copy requirements first for better layer caching
+# Copy pyproject.toml first for better layer caching
+COPY pyproject.toml .
 COPY requirements.txt .
 RUN uv pip install --no-cache-dir -r requirements.txt
 

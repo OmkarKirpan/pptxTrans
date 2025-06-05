@@ -1,70 +1,78 @@
 #!/bin/bash
 
-# Script to start the share service for local testing
+# Script to start the Share service for local testing
 
-# Color codes for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-BLUE='\033[0;34m'
-MAGENTA='\033[0;35m'
-CYAN='\033[0;36m'
-NC='\033[0m' # No Color
+echo "Starting Share Service..."
 
-echo -e "${MAGENTA}"
-echo "======================================================"
-echo "           Share Service Launcher                      "
-echo "======================================================"
-echo -e "${NC}"
+# Find the project root (where package.json is located)
+find_root() {
+  local current_dir="$PWD"
+  while [[ "$current_dir" != "/" ]]; do
+    if [[ -f "$current_dir/package.json" ]]; then
+      echo "$current_dir"
+      return 0
+    fi
+    current_dir="$(dirname "$current_dir")"
+  done
+  echo "$PWD"  # Fallback to current directory
+}
+
+# Get project root
+PROJECT_ROOT=$(find_root)
+SHARE_SERVICE_DIR="$PROJECT_ROOT/services/share-service"
 
 # Check if the share service directory exists
-if [ ! -d "services/share-service" ]; then
-  echo -e "${RED}Error: services/share-service directory not found!${NC}"
+if [ ! -d "$SHARE_SERVICE_DIR" ]; then
+  echo "Error: share-service directory not found at $SHARE_SERVICE_DIR!"
   exit 1
 fi
 
 # Check if .env file already exists
-if [ ! -f "services/share-service/.env" ]; then
+if [ ! -f "$SHARE_SERVICE_DIR/.env" ]; then
   # Create the .env file with required variables if it doesn't exist
-  echo -e "${BLUE}Creating .env file with required variables...${NC}"
+  echo "Creating .env file with required variables..."
 
   # Create a .env file with required variables
-  cat > services/share-service/.env << EOF
-PORT=3003
-LOG_LEVEL=debug
-JWT_SECRET=local-development-secret-key
+  cat > "$SHARE_SERVICE_DIR/.env" << EOF
+PORT=3001
 CORS_ORIGIN=http://localhost:3000
 EOF
 
   # Check if Supabase values are already in the file
-  if ! grep -q "SUPABASE_URL" services/share-service/.env; then
+  if ! grep -q "SUPABASE_URL" "$SHARE_SERVICE_DIR/.env"; then
     # Supabase URL not found, add default values
-    cat >> services/share-service/.env << EOF
+    cat >> "$SHARE_SERVICE_DIR/.env" << EOF
 SUPABASE_URL=https://your-project-id.supabase.co
+SUPABASE_KEY=your-supabase-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-key
-SUPABASE_JWT_SECRET=your-supabase-jwt-secret
 EOF
     
-    echo -e "${YELLOW}Please update services/share-service/.env with your actual Supabase credentials.${NC}"
+    echo "Please update $SHARE_SERVICE_DIR/.env with your actual Supabase credentials."
     echo "Press Ctrl+C to exit or any key to continue..."
     read -n 1 -s
   fi
 else
-  echo -e "${GREEN}Using existing .env file in share-service directory.${NC}"
+  echo "Using existing .env file in share-service directory."
 fi
 
 # Navigate to the share service directory
-cd services/share-service
+cd "$SHARE_SERVICE_DIR"
 
 # Check if Bun is installed
 if ! command -v bun &> /dev/null; then
-  echo -e "${RED}Error: Bun is not installed or not in PATH!${NC}"
-  echo "Please install Bun (https://bun.sh) to continue"
+  echo "Error: Bun is not installed or not in PATH!"
+  echo "Please install Bun to continue: https://bun.sh/"
   exit 1
 fi
 
-# Run the service using the npm script
-echo -e "${GREEN}Running share service on port 3003...${NC}"
+# Install dependencies if needed
+if [ -f "package.json" ] && [ ! -d "node_modules" ]; then
+  echo "Installing dependencies with bun..."
+  bun install
+fi
+
+# Run the service in development mode
+echo "Running Share service on port 3001..."
 bun run dev
 
 # This script can be enhanced to include database setup, migrations, etc. 

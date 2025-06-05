@@ -1,69 +1,93 @@
 @echo off
-setlocal enabledelayedexpansion
+REM Script to start the Share service for local testing on Windows
 
-:: Script to start the share service for local testing on Windows
+echo Starting Share Service...
 
-:: Color codes for Windows console
-set "RED=[91m"
-set "GREEN=[92m"
-set "YELLOW=[93m"
-set "BLUE=[94m"
-set "MAGENTA=[95m"
-set "CYAN=[96m"
-set "NC=[0m"
+REM Find the project root (where package.json is located)
+call :find_root
+set PROJECT_ROOT=%ERRORLEVEL%
+set SHARE_SERVICE_DIR=%PROJECT_ROOT%\services\share-service
 
-echo !MAGENTA!
-echo ======================================================
-echo            Share Service Launcher                      
-echo ======================================================
-echo !NC!
-
-:: Check if the share service directory exists
-if not exist "services\share-service" (
-    echo !RED!Error: services\share-service directory not found!!NC!
+REM Check if the share service directory exists
+if not exist "%SHARE_SERVICE_DIR%" (
+    echo Error: share-service directory not found at %SHARE_SERVICE_DIR%!
     exit /b 1
 )
 
-:: Check if .env file already exists
-if not exist "services\share-service\.env" (
-    :: Create the .env file with required variables if it doesn't exist
-    echo !BLUE!Creating .env file with required variables...!NC!
+REM Check if .env file already exists
+if not exist "%SHARE_SERVICE_DIR%\.env" (
+    REM Create the .env file with required variables if it doesn't exist
+    echo Creating .env file with required variables...
     (
-    echo PORT=3003
-    echo LOG_LEVEL=debug
-    echo JWT_SECRET=local-development-secret-key
+    echo PORT=3001
     echo CORS_ORIGIN=http://localhost:3000
-    ) > services\share-service\.env
+    ) > "%SHARE_SERVICE_DIR%\.env"
 
-    :: Check if Supabase values need to be added
-    findstr /c:"SUPABASE_URL" services\share-service\.env >nul
-    if !ERRORLEVEL! neq 0 (
-        echo SUPABASE_URL=https://your-project-id.supabase.co >> services\share-service\.env
-        echo SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-key >> services\share-service\.env
-        echo SUPABASE_JWT_SECRET=your-supabase-jwt-secret >> services\share-service\.env
+    REM Check if Supabase values need to be added
+    findstr /c:"SUPABASE_URL" "%SHARE_SERVICE_DIR%\.env" >nul
+    if %ERRORLEVEL% neq 0 (
+        echo SUPABASE_URL=https://your-project-id.supabase.co >> "%SHARE_SERVICE_DIR%\.env"
+        echo SUPABASE_KEY=your-supabase-anon-key >> "%SHARE_SERVICE_DIR%\.env"
+        echo SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-key >> "%SHARE_SERVICE_DIR%\.env"
         
-        echo !YELLOW!Please update services\share-service\.env with your actual Supabase credentials.!NC!
+        echo Please update %SHARE_SERVICE_DIR%\.env with your actual Supabase credentials.
         echo Press Ctrl+C to exit or any key to continue...
         pause >nul
     )
 ) else (
-    echo !GREEN!Using existing .env file in share-service directory.!NC!
+    echo Using existing .env file in share-service directory.
 )
 
-:: Navigate to the share service directory
-cd services\share-service
+REM Navigate to the share service directory
+cd /d "%SHARE_SERVICE_DIR%"
 
-:: Check if Bun is installed
+REM Check if Bun is installed
 where bun >nul 2>nul
-if !ERRORLEVEL! neq 0 (
-    echo !RED!Error: Bun is not installed or not in PATH!!NC!
-    echo Please install Bun (https://bun.sh) to continue
+if %ERRORLEVEL% neq 0 (
+    echo Error: Bun is not installed or not in PATH!
+    echo Please install Bun to continue: https://bun.sh/
     exit /b 1
 )
 
-:: Run the service using the npm script
-echo !GREEN!Running share service on port 3003...!NC!
+REM Install dependencies if needed
+if exist "package.json" if not exist "node_modules" (
+    echo Installing dependencies with bun...
+    bun install
+)
+
+REM Run the service
+echo Running Share service on port 3001...
 bun run dev
 
-:: This script can be enhanced to include database setup, migrations, etc.
-endlocal 
+exit /b 0
+
+REM Function to find the project root
+:find_root
+setlocal enabledelayedexpansion
+set current_dir=%CD%
+set found=0
+
+REM Try to find package.json in current or parent directories
+:find_root_loop
+if exist "%current_dir%\package.json" (
+    set found=1
+    goto :found_root
+)
+
+REM Go up one directory
+for %%I in ("%current_dir%\.") do set "parent_dir=%%~dpI"
+set "parent_dir=%parent_dir:~0,-1%"
+
+REM Check if we've reached the root
+if "%parent_dir%" == "%current_dir%" goto :found_root
+
+set "current_dir=%parent_dir%"
+goto :find_root_loop
+
+:found_root
+if "%found%" == "1" (
+    endlocal & exit /b %current_dir%
+) else (
+    REM Fallback to current directory if not found
+    endlocal & exit /b %CD%
+) 

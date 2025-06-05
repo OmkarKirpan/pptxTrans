@@ -1,105 +1,127 @@
 @echo off
-setlocal enabledelayedexpansion
+REM Script to start the PPTX processor service for local testing on Windows
 
-:: Script to start the PPTX processor service for local testing on Windows
-
-:: Color codes for Windows console
-set "RED=[91m"
-set "GREEN=[92m"
-set "YELLOW=[93m"
-set "BLUE=[94m"
-set "MAGENTA=[95m"
-set "CYAN=[96m"
-set "NC=[0m"
-
-echo !MAGENTA!
 echo ======================================================
 echo          PPTX Processor Service Launcher              
 echo ======================================================
-echo !NC!
 
-:: Check if the PPTX processor service directory exists
-if not exist "services\pptx-processor" (
-    echo !RED!Error: services\pptx-processor directory not found!!NC!
+REM Find the project root (where package.json is located)
+call :find_root
+set PROJECT_ROOT=%ERRORLEVEL%
+set PPTX_SERVICE_DIR=%PROJECT_ROOT%\services\pptx-processor
+
+REM Check if the PPTX processor service directory exists
+if not exist "%PPTX_SERVICE_DIR%" (
+    echo Error: pptx-processor directory not found at %PPTX_SERVICE_DIR%!
     exit /b 1
 )
 
-:: Check if .env file already exists
-if not exist "services\pptx-processor\.env" (
-    :: Create the .env file with required variables if it doesn't exist
-    echo !BLUE!Creating .env file with required variables...!NC!
+REM Check if .env file already exists
+if not exist "%PPTX_SERVICE_DIR%\.env" (
+    REM Create the .env file with required variables if it doesn't exist
+    echo Creating .env file with required variables...
     (
     echo PORT=3001
     echo LOG_LEVEL=debug
     echo CORS_ORIGIN=http://localhost:3000
     echo UPLOADS_DIR=./uploads
     echo PROCESSING_DIR=./processing
-    ) > services\pptx-processor\.env
+    ) > "%PPTX_SERVICE_DIR%\.env"
 
-    :: Check if Supabase values need to be added
-    findstr /c:"SUPABASE_URL" services\pptx-processor\.env >nul
-    if !ERRORLEVEL! neq 0 (
-        echo SUPABASE_URL=https://your-project-id.supabase.co >> services\pptx-processor\.env
-        echo SUPABASE_KEY=your-supabase-anon-key >> services\pptx-processor\.env
+    REM Check if Supabase values need to be added
+    findstr /c:"SUPABASE_URL" "%PPTX_SERVICE_DIR%\.env" >nul
+    if %ERRORLEVEL% neq 0 (
+        echo SUPABASE_URL=https://your-project-id.supabase.co >> "%PPTX_SERVICE_DIR%\.env"
+        echo SUPABASE_KEY=your-supabase-anon-key >> "%PPTX_SERVICE_DIR%\.env"
         
-        echo !YELLOW!Please update services\pptx-processor\.env with your actual Supabase credentials.!NC!
+        echo Please update %PPTX_SERVICE_DIR%\.env with your actual Supabase credentials.
         echo Press Ctrl+C to exit or any key to continue...
         pause >nul
     )
 ) else (
-    echo !GREEN!Using existing .env file in pptx-processor directory.!NC!
+    echo Using existing .env file in pptx-processor directory.
 )
 
-:: Create necessary directories for uploads and processing
-if not exist services\pptx-processor\uploads mkdir services\pptx-processor\uploads
-if not exist services\pptx-processor\processing mkdir services\pptx-processor\processing
+REM Create necessary directories for uploads and processing
+if not exist "%PPTX_SERVICE_DIR%\uploads" mkdir "%PPTX_SERVICE_DIR%\uploads"
+if not exist "%PPTX_SERVICE_DIR%\processing" mkdir "%PPTX_SERVICE_DIR%\processing"
 
-:: Navigate to the PPTX processor service directory
-cd services\pptx-processor
+REM Navigate to the PPTX processor service directory
+cd /d "%PPTX_SERVICE_DIR%"
 
-:: Check if Python is installed
+REM Check if Python is installed
 where python >nul 2>nul
-if !ERRORLEVEL! neq 0 (
-    echo !RED!Error: Python is not installed or not in PATH!!NC!
+if %ERRORLEVEL% neq 0 (
+    echo Error: Python is not installed or not in PATH!
     echo Please install Python to continue
     exit /b 1
 )
 
-:: Check if required dependencies are installed
-echo !BLUE!Checking dependencies...!NC!
+REM Check if required dependencies are installed
+echo Checking dependencies...
 where libreoffice >nul 2>nul
-if !ERRORLEVEL! neq 0 (
-    echo !YELLOW!Warning: LibreOffice is not installed or not in PATH!NC!
+if %ERRORLEVEL% neq 0 (
+    echo Warning: LibreOffice is not installed or not in PATH
     echo Some features may not work correctly without LibreOffice
 )
 
-:: Check if uv is installed
+REM Check if uv is installed
 where uv >nul 2>nul
-if !ERRORLEVEL! neq 0 (
-    echo !RED!Error: uv is not installed or not in PATH!!NC!
-    echo Please install uv from: https://github.com/astral-sh/uv
+if %ERRORLEVEL% neq 0 (
+    echo Error: uv is not installed or not in PATH!
+    echo Please install uv using: curl -sSf https://astral.sh/uv/install.sh ^| sh
     exit /b 1
 )
 
-:: Create and activate virtual environment with uv if it doesn't exist
-if not exist .venv (
-    echo !BLUE!Creating virtual environment with uv...!NC!
+REM Create and activate virtual environment with uv if it doesn't exist
+if not exist ".venv" (
+    echo Creating virtual environment with uv...
     uv venv .venv
 )
 
-:: Activate virtual environment
-echo !BLUE!Activating virtual environment...!NC!
+REM Activate virtual environment
+echo Activating virtual environment...
 call .venv\Scripts\activate.bat
 
-:: Install requirements if needed
-if exist requirements.txt (
-    echo !BLUE!Installing dependencies with uv...!NC!
+REM Install requirements if needed
+if exist "requirements.txt" (
+    echo Installing dependencies with uv...
     uv pip install -r requirements.txt
 )
 
-:: Run the service
-echo !GREEN!Running PPTX processor service on port 3001...!NC!
-uv python -m app.main
+REM Run the service
+echo Running PPTX processor service on port 8000...
+uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 
-:: This script can be enhanced to include database setup, migrations, etc.
-endlocal 
+exit /b 0
+
+REM Function to find the project root
+:find_root
+setlocal enabledelayedexpansion
+set current_dir=%CD%
+set found=0
+
+REM Try to find package.json in current or parent directories
+:find_root_loop
+if exist "%current_dir%\package.json" (
+    set found=1
+    goto :found_root
+)
+
+REM Go up one directory
+for %%I in ("%current_dir%\.") do set "parent_dir=%%~dpI"
+set "parent_dir=%parent_dir:~0,-1%"
+
+REM Check if we've reached the root
+if "%parent_dir%" == "%current_dir%" goto :found_root
+
+set "current_dir=%parent_dir%"
+goto :find_root_loop
+
+:found_root
+if "%found%" == "1" (
+    endlocal & exit /b %current_dir%
+) else (
+    REM Fallback to current directory if not found
+    endlocal & exit /b %CD%
+) 
