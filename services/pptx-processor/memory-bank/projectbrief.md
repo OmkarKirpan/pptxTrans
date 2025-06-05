@@ -1,48 +1,61 @@
 # PPTX Processor Microservice - Project Brief
 
 ## Project Purpose
-A Python-based microservice for converting PowerPoint (PPTX) presentations to SVGs and extracting text data with positioning information. This service is a critical component of the PowerPoint Translator App, enabling high-fidelity slide rendering and text translation while maintaining visual fidelity.
+A Python-based microservice for converting PowerPoint (PPTX) presentations to SVGs using LibreOffice and extracting text data with positioning information using python-pptx. This service is a critical component of the PowerPoint Translator App, enabling high-fidelity slide rendering and text translation while maintaining visual fidelity.
 
-## Core Requirements (Clarified)
+## Core Requirements (Updated)
 1. Accept PPTX files from frontend or retrieve from Supabase storage
-2. Convert PPTX slides to SVG format (one SVG per slide)
-3. Extract text elements with precise coordinates and styling information
-4. Generate metadata for text display in slidecanvas frontend component
-5. Store processed assets in Supabase Storage (optional)
-6. Return structured data for frontend translation interface
-7. Simple, working implementation without unnecessary complexity
+2. Convert PPTX slides to SVG format using LibreOffice (one SVG per slide)
+3. Extract text elements with precise coordinates and styling information using python-pptx
+4. Generate enhanced metadata optimized for text translation and frontend overlay positioning
+5. Store processed assets in Supabase Storage
+6. Return structured data compatible with frontend translation interface
+7. Simplified LibreOffice-only approach without fallback complexity
+8. Docker containerized deployment for consistent environment
 
 ## User Requirements
-- **Primary Goal**: Enable PPTX text translation in frontend
+- **Primary Goal**: Enable PPTX text translation in frontend with accurate positioning
 - **Input**: PPTX file (from upload or Supabase)
-- **Output**: SVG per slide + text metadata for translation
-- **Complexity**: Keep it simple - no security, no complex testing, just working functionality
-- **Platform**: Must work on Windows development environment
+- **Output**: LibreOffice-generated SVG per slide + enhanced text metadata for translation
+- **Complexity**: Simplified architecture focusing on reliability over feature complexity
+- **Platform**: Docker containerized for consistent deployment across environments
+- **Integration**: Smooth integration with Next.js frontend slidecanvas component
 
-## Tech Stack (Revised)
+## Tech Stack (Simplified)
 - **FastAPI**: Web framework for API endpoints ✓
-- **Python-PPTX**: Library for parsing PowerPoint files ✓
-- **SVG Generation**: Custom implementation (not CairoSVG due to Windows issues)
-- **Supabase**: Storage for assets (optional for basic functionality)
+- **LibreOffice**: Primary and only SVG generation method (headless mode) ✓
+- **Python-PPTX**: Enhanced text extraction with translation-optimized metadata ✓
+- **Supabase**: Storage and database integration ✓
 - **UV**: Package management tool ✓
-- **No Celery/Redis**: Simplified architecture without task queue
+- **Docker**: Containerized deployment with LibreOffice pre-installed ✓
+- **No Fallbacks**: Removed ElementTree, CairoSVG, Celery, Redis complexity
 
-## Current State
+## Current State (Updated)
 - **Structure**: Well-organized FastAPI application ✓
-- **Dependencies**: Installed but Cairo issue on Windows ❌
-- **Core Feature**: Mock implementation only, needs real conversion ❌
-- **Architecture**: Overly complex with unnecessary dependencies ⚠️
+- **Dependencies**: Streamlined to essential components only
+- **Core Feature**: LibreOffice integration needs fixing for SVG generation ❌
+- **Architecture**: Simplified to single-path processing ⚠️
+- **Text Extraction**: Needs enhancement for translation compatibility ⚠️
 
 ## Success Criteria
-1. Application runs on Windows without dependency issues
-2. Can process real PPTX files and generate actual SVGs
-3. Extracts text with accurate positioning for frontend
-4. Returns metadata in format compatible with slidecanvas component
-5. Simple to run and test locally
+1. LibreOffice SVG generation works reliably in Docker environment
+2. Enhanced text extraction provides accurate coordinates for frontend overlay
+3. Seamless integration with frontend slidecanvas component
+4. Comprehensive documentation for development team integration
+5. Simplified, maintainable codebase without unnecessary complexity
+6. Docker deployment ensures consistent behavior across environments
 
-## Next Steps
-1. Replace CairoSVG with alternative SVG generation method
-2. Implement actual PPTX to SVG conversion
-3. Simplify architecture by removing Celery/Redis
-4. Create working demo with real PPTX processing
-5. Test with slidecanvas frontend component 
+## Next Steps (Implementation Plan)
+1. **Phase 1**: Fix LibreOffice integration and remove hybrid approach complexity
+2. **Phase 2**: Enhance python-pptx text extraction for translation optimization
+3. **Phase 3**: Simplify service architecture and remove unnecessary dependencies
+4. **Phase 4**: Implement comprehensive error handling and reliability
+5. **Phase 5**: Optimize frontend integration compatibility
+6. **Phase 6**: Create complete integration documentation for development team
+
+## Key Architectural Decisions
+- **LibreOffice Only**: Single path for SVG generation, no fallbacks
+- **Enhanced Text Extraction**: python-pptx optimized for translation workflows
+- **Docker First**: Development and deployment in containerized environment
+- **Frontend Integration**: API designed specifically for slidecanvas component needs
+- **Translation Focus**: All metadata structured for optimal translation experience 

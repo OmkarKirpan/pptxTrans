@@ -1,88 +1,103 @@
 # Active Context
 
 ## Current Focus
-Successfully integrated Supabase for storage and got basic PPTX processing working. The service can now:
-- Accept PPTX file uploads
-- Process slides using fallback SVG generation (ElementTree)
-- Upload SVGs and thumbnails to Supabase storage
-- Track job status and allow retrying failed jobs
+Implementing simplified LibreOffice-only approach for PPTX processing with enhanced text extraction for translation optimization. The service will focus on:
+- Fixing LibreOffice SVG generation in Docker environment
+- Enhancing python-pptx text extraction for accurate frontend overlay positioning
+- Simplifying architecture by removing hybrid approach complexity
+- Creating comprehensive integration documentation for development team
 
-## Recent Changes
-1. **Fixed Critical Bugs**:
-   - Slide dimensions now correctly accessed from presentation object
-   - MSO_VERTICAL_ANCHOR enum mapping fixed by removing non-existent values
-   - Supabase URL validation improved with normalization
+## Recent Changes & Implementation Plan
+1. **Architectural Simplification**:
+   - Decided to remove ElementTree fallback SVG generation
+   - Eliminating CairoSVG, Celery, Redis dependencies
+   - Focus on LibreOffice-only approach for SVG generation
+   - Docker-first deployment strategy
 
-2. **Supabase Integration**:
-   - Successfully connected to local Supabase instance
-   - Created all required database tables
-   - Configured storage buckets (slide-visuals, processing-results)
-   - Disabled RLS for development to avoid permission issues
+2. **Enhanced Integration Focus**:
+   - Prioritizing seamless frontend slidecanvas integration
+   - Optimizing API responses for translation workflows
+   - Creating comprehensive documentation for development team
+   - Focusing on practical functionality over feature complexity
 
-3. **Error Handling**:
-   - Added graceful handling of storage bucket creation errors
-   - Implemented retry mechanism for failed jobs
-   - Better logging throughout the process
+## Current Implementation Status
+- **Phase 1 (In Progress)**: LibreOffice Integration Fix & Simplification
+  - Remove hybrid approach complexity ⏳
+  - Fix LibreOffice SVG generation in Docker environment ⏳
+  - Enhance batch processing reliability ⏳
 
-## Current Issues
-1. **LibreOffice**: Conversion command executes but produces no SVG output
-   - Might be Windows path or command argument issue
-   - Fallback to ElementTree is working fine
+- **Phase 2 (Planned)**: Python-PPTX Text Extraction Enhancement
+  - Improve text positioning accuracy for overlay rendering
+  - Create translation-optimized data structures
+  - Cross-reference with LibreOffice SVG output
 
-2. **Performance**: Need to optimize for larger presentations
+- **Phase 3 (Planned)**: Service Architecture Simplification
+  - Remove unnecessary dependencies
+  - Streamline processing pipeline
+  - Optimize Docker environment
 
-## Next Steps
-1. Debug LibreOffice SVG generation on Windows
-2. Test with various PPTX files to ensure robustness
-3. Add production-ready RLS policies
-4. Improve error recovery mechanisms
-5. Performance optimization for large files
+## Current Issues Being Addressed
+1. **LibreOffice SVG Generation**: Command executes but produces no output
+   - Moving from Windows development to Docker Linux environment
+   - Implementing proper headless LibreOffice configuration
+   - Adding comprehensive error handling and logging
+
+2. **Text Coordinate Accuracy**: Need precise positioning for frontend overlay
+   - Enhancing python-pptx extraction for translation-specific metadata
+   - Ensuring coordinate system compatibility with LibreOffice SVG output
+   - Adding text bounding box calculations
+
+3. **Architecture Complexity**: Removing unnecessary fallback systems
+   - Eliminating ElementTree SVG generation
+   - Simplifying error handling to fail gracefully without fallbacks
+   - Streamlining dependency management
+
+## Next Immediate Steps
+1. **Fix LibreOffice Integration (Phase 1)**:
+   - Debug LibreOffice command for proper SVG generation
+   - Configure LibreOffice for headless operation in Docker
+   - Remove ElementTree and fallback SVG generation code
+   - Simplify processing pipeline to single-path approach
+
+2. **Enhance Text Extraction (Phase 2)**:
+   - Improve `extract_shapes` function for precise coordinates
+   - Add translation-optimized metadata structure
+   - Implement text segmentation for better translation units
+   - Add coordinate validation against LibreOffice output
+
+3. **Create Integration Documentation (Phase 6)**:
+   - API documentation with complete OpenAPI specs
+   - Frontend integration guide for slidecanvas component
+   - Docker deployment and development setup guide
+   - Troubleshooting and error handling documentation
 
 ## Technical State
-- API running on http://localhost:8000
-- Supabase running on http://127.0.0.1:54321
-- Storage buckets configured and working
-- Database schema implemented
-- Background task processing active
-- Retry mechanism implemented
+- **API**: Running on FastAPI framework ✓
+- **LibreOffice**: Needs configuration fix for SVG generation ❌
+- **Supabase**: Connected and working for storage/database ✓
+- **Docker**: Environment needs LibreOffice optimization ⚠️
+- **Dependencies**: Require cleanup and simplification ⚠️
+- **Documentation**: Needs creation for development team integration ❌
 
-## User Workflow
+## User Workflow (Simplified)
 1. Upload PPTX file to `/api/process`
-2. Receive job ID and session ID
-3. Check status at `/status/status/{job_id}`
-4. If failed, can retry with `/status/retry/{job_id}`
-5. Get results at `/status/results/{session_id}` when completed
+2. LibreOffice batch converts all slides to SVG
+3. python-pptx extracts enhanced text metadata for each slide
+4. Assets uploaded to Supabase storage
+5. Frontend receives structured data for slidecanvas integration
+6. Translation interface uses precise coordinates for text overlay
 
-## Active Decisions
-- **SVG Visuals (Primary)**: Batch LibreOffice `soffice.exe` call (`_generate_svgs_for_all_slides_libreoffice`) converting all slides at once.
-- **SVG Visuals (Fallback)**: ElementTree-based generation (`create_svg_from_slide`) using pre-extracted shape data.
-- **Text/Metadata Extraction**: `python-pptx` (via `extract_shapes`), performed once per slide.
-- **`LIBREOFFICE_PATH`**: Configurable via `.env` and `app.core.config.settings`.
+## Active Architectural Decisions
+- **SVG Generation**: LibreOffice batch processing only (no fallbacks)
+- **Text Extraction**: Enhanced python-pptx with translation optimization
+- **Error Handling**: Graceful failure without fallback complexity
+- **Deployment**: Docker-first with LibreOffice pre-installed
+- **Integration**: API designed specifically for frontend slidecanvas needs
+- **Documentation**: Comprehensive guides for development team integration
 
-## Implementation Details for Hybrid Approach
-- `process_pptx` function:
-    - Checks for configured and valid `settings.LIBREOFFICE_PATH`.
-    - Calls `_generate_svgs_for_all_slides_libreoffice` once to get a dictionary mapping slide numbers to SVG paths.
-    - Iterates through slides, calling `process_slide` for each.
-- `_generate_svgs_for_all_slides_libreoffice` function:
-    - Uses `soffice --headless --convert-to svg:"impress_svg_Export" ...`.
-    - Manages a temporary directory for LibreOffice output.
-    - Attempts to sort and rename/map generated SVGs to `slide_{n}.svg` in the main processing output directory.
-    - Returns a dictionary `Dict[int, str]` of slide numbers to SVG paths.
-- `process_slide` function:
-    - Receives the path to a pre-generated LibreOffice SVG (if available).
-    - Calls `extract_shapes` once.
-    - If pre-generated SVG is not valid/available, calls `create_svg_from_slide` (passing extracted shapes and background fill).
-    - Uploads the chosen SVG.
-    - Generates thumbnail using `create_thumbnail_from_slide_pil` (passing extracted shapes).
-- `extract_shapes` provides all necessary data for both `ProcessedSlide` model and SVG fallback rendering.
-
-## User Requirements Clarified
-- App will take PPTX from frontend or get it from Supabase storage.
-- Generate SVG per slide with metadata for text display in slidecanvas frontend component.
-- Used for PPTX text translation.
-- No security or tests needed - just working functionality (though robustness is being improved).
-
-## Current Questions
-- How consistently does `impress_svg_Export` name output files across different LibreOffice versions/OS when converting a whole presentation?
-- What is the best strategy if `_generate_svgs_for_all_slides_libreoffice` produces an unexpected number of SVG files (e.g., not matching `slide_count`)? 
+## Integration Requirements
+- **Frontend Compatibility**: API responses optimized for slidecanvas component
+- **Translation Focus**: Metadata structured for optimal translation workflows
+- **Developer Experience**: Clear documentation and integration patterns
+- **Reliability**: Simplified architecture for better maintainability
+- **Performance**: Docker optimization for consistent processing speed 
