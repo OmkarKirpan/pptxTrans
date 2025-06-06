@@ -14,12 +14,15 @@ services:
       - NEXT_PUBLIC_AUDIT_SERVICE_URL=http://audit-service:4006
       - NEXT_PUBLIC_PPTX_PROCESSOR_URL=http://pptx-processor:8000
       - NEXT_PUBLIC_SHARE_SERVICE_URL=http://share-service:3001
+      - NEXT_PUBLIC_TRANSLATION_SESSION_SERVICE_URL=http://translation-session-service:3002
     depends_on:
       audit-service:
         condition: service_healthy
       pptx-processor:
         condition: service_healthy
       share-service:
+        condition: service_started
+      translation-session-service:
         condition: service_started
     networks:
       - pptxtransed-network
@@ -121,6 +124,24 @@ services:
       - SUPABASE_KEY=${SUPABASE_ANON_KEY}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
       - SHARE_TOKEN_SECRET=${JWT_SECRET:-local-development-secret-key}
+    networks:
+      - pptxtransed-network
+    restart: unless-stopped
+
+  # Translation Session Service (Bun)
+  translation-session-service:
+    build:
+      context: ./services/translation-session-service
+      dockerfile: Dockerfile
+    container_name: pptxtransed-translation-session-service
+    ports:
+      - "3002:3002"
+    environment:
+      - PORT=3002
+      - NODE_ENV=development
+      - FRONTEND_URL=http://localhost:3000
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
     networks:
       - pptxtransed-network
     restart: unless-stopped

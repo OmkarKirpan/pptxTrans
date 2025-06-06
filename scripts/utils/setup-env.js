@@ -17,6 +17,7 @@ const DEFAULT_ENV = {
   
   // Security Settings
   'JWT_SECRET': 'local-development-secret-key',
+  'SHARE_TOKEN_SECRET': 'local-development-secret-key',
   
   // Environment
   'NODE_ENV': 'development',
@@ -26,12 +27,35 @@ const DEFAULT_ENV = {
  * Creates or updates the .env file using the docker-compose.env.example template
  */
 async function setupEnv() {
-  console.log('Setting up environment variables...');
+  console.log('⚙️  Setting up environment variables...');
   
   // Check if .env file already exists
   if (fs.existsSync(ENV_FILE_PATH)) {
-    console.log('Found existing .env file. Skipping setup to preserve your configuration.');
-    console.log('If you want to recreate it, delete the .env file and run this script again.');
+    console.log('✅ Found existing .env file. Checking for missing variables...');
+    
+    // Read existing .env content
+    let envContent = fs.readFileSync(ENV_FILE_PATH, 'utf8');
+    let updated = false;
+    
+    // Check for missing required variables
+    const requiredVars = Object.keys(DEFAULT_ENV);
+    const missingVars = [];
+    
+    for (const [key, value] of Object.entries(DEFAULT_ENV)) {
+      if (!envContent.includes(`${key}=`)) {
+        envContent += `\n${key}=${value}`;
+        missingVars.push(key);
+        updated = true;
+      }
+    }
+    
+    if (updated) {
+      fs.writeFileSync(ENV_FILE_PATH, envContent);
+      console.log(`✅ Added missing environment variables: ${missingVars.join(', ')}`);
+    }
+    
+    console.log('ℹ️  To preserve your configuration, existing values were not modified.');
+    console.log('💡 If you want to recreate it, delete the .env file and run this script again.');
     return;
   }
   
@@ -39,10 +63,15 @@ async function setupEnv() {
   
   // Try to use the docker-compose.env.example template first
   if (fs.existsSync(ENV_EXAMPLE_PATH)) {
-    console.log('Using docker-compose.env.example template...');
+    console.log('📋 Using docker-compose.env.example template...');
     templateContent = fs.readFileSync(ENV_EXAMPLE_PATH, 'utf8');
+    
+    // Ensure SHARE_TOKEN_SECRET is included
+    if (!templateContent.includes('SHARE_TOKEN_SECRET=')) {
+      templateContent += '\n# Share Service Token Secret\nSHARE_TOKEN_SECRET=local-development-secret-key\n';
+    }
   } else {
-    console.log('Template not found, using default values...');
+    console.log('📋 Template not found, using default values...');
     // Fallback to default values
     templateContent = Object.entries(DEFAULT_ENV)
       .map(([key, value]) => `${key}=${value}`)
@@ -52,15 +81,62 @@ async function setupEnv() {
   // Write to .env file
   fs.writeFileSync(ENV_FILE_PATH, templateContent);
   
-  console.log('.env file created successfully from template.');
+  console.log('✅ .env file created successfully from template.');
   console.log('');
   console.log('🚨 IMPORTANT: Please update the values in .env with your actual Supabase credentials:');
   console.log('   1. SUPABASE_URL - Your Supabase project URL');
   console.log('   2. SUPABASE_ANON_KEY - Your Supabase anonymous key');
   console.log('   3. SUPABASE_SERVICE_ROLE_KEY - Your Supabase service role key');
   console.log('   4. SUPABASE_JWT_SECRET - Your Supabase JWT secret');
+  console.log('   5. JWT_SECRET - Your application JWT secret');
+  console.log('   6. SHARE_TOKEN_SECRET - Your share service token secret');
   console.log('');
   console.log('📖 See docs/setup/environment-setup.md for detailed setup instructions.');
+}
+
+/**
+ * Validate environment variables
+ */
+function validateEnv() {
+  if (!fs.existsSync(ENV_FILE_PATH)) {
+    console.log('❌ No .env file found');
+    return false;
+  }
+  
+  const envContent = fs.readFileSync(ENV_FILE_PATH, 'utf8');
+  const requiredVars = Object.keys(DEFAULT_ENV);
+  const missingVars = [];
+  const invalidVars = [];
+  
+  for (const varName of requiredVars) {
+    if (!envContent.includes(`${varName}=`)) {
+      missingVars.push(varName);
+    } else {
+      // Check for placeholder values
+      if (envContent.includes(`${varName}=your-`) ||
+          envContent.includes(`${varName}=https://your-project-id.supabase.co`) ||
+          (varName.includes('SECRET') && envContent.includes(`${varName}=local-development-secret-key`))) {
+        invalidVars.push(varName);
+      }
+    }
+  }
+  
+  if (missingVars.length > 0) {
+    console.log('❌ Missing environment variables:');
+    missingVars.forEach(varName => console.log(`   - ${varName}`));
+  }
+  
+  if (invalidVars.length > 0) {
+    console.log('⚠️  Environment variables with default/placeholder values:');
+    invalidVars.forEach(varName => console.log(`   - ${varName}`));
+  }
+  
+  if (missingVars.length === 0 && invalidVars.length === 0) {
+    console.log('✅ All environment variables are set');
+    return true;
+  }
+  
+  return false;
 }
 
 // If this script is run directly
@@ -73,5 +149,6 @@ if (require.main === module) {
 
 module.exports = {
   setupEnv,
+  validateEnv,
   ENV_FILE_PATH,
 }; 

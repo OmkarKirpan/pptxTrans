@@ -22,8 +22,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o audit-service cmd/serv
 # Final stage
 FROM alpine:latest
 
-# Install ca-certificates for HTTPS
-RUN apk --no-cache add ca-certificates
+# Install ca-certificates for HTTPS and wget for health checks
+RUN apk --no-cache add ca-certificates wget
 
 # Create non-root user
 RUN addgroup -g 1000 -S audit && \
@@ -34,6 +34,9 @@ WORKDIR /app
 
 # Copy binary from builder
 COPY --from=builder /app/audit-service .
+
+# Copy .env file if it exists (for Docker environment)
+COPY --from=builder /app/.env* ./
 
 # Change ownership
 RUN chown -R audit:audit /app

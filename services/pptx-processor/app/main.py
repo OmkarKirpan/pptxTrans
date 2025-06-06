@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import os
 from dotenv import load_dotenv
 import logging
-from python_json_logger import jsonlogger
+from pythonjsonlogger.json import JsonFormatter
 
 from app.api.routes import processing, status, health, metrics, export
 from app.core.config import Settings, get_settings
@@ -31,7 +31,7 @@ def setup_logging():
     # format_str = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     # More detailed format string including timestamp, level, name, message, and any extra fields passed
     format_str = '%(timestamp)s %(levelname)s %(name)s %(message)s'
-    formatter = jsonlogger.JsonFormatter(
+    formatter = JsonFormatter(
         format_str,
         rename_fields={'asctime': 'timestamp', 'levelname': 'level', 'name': 'logger_name'},
         datefmt="%Y-%m-%dT%H:%M:%S%z" # ISO 8601 format

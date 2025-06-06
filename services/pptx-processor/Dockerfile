@@ -56,6 +56,11 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Copy the application code
 COPY --chown=appuser:appuser . .
 
+# Copy .env file if it exists (for Docker environment)
+# Note: .env files are copied with the application code above
+# but we ensure proper permissions here
+RUN if [ -f .env ]; then chown appuser:appuser .env; fi
+
 # Create necessary directories with proper permissions
 RUN mkdir -p /tmp/uploads /tmp/processing \
     && chown -R appuser:appuser /tmp/uploads /tmp/processing \
