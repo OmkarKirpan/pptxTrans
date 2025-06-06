@@ -1,182 +1,426 @@
 # System Patterns: PowerPoint Translator App
 
-## 1. Overall Architecture
-- **Microservice Architecture:** The application consists of three main components:
-  1. **Next.js Frontend:** Handles user interface, authentication, and client-side interactions
-  2. **Python FastAPI PPTX Processor Service:** Manages PPTX conversion, SVG generation, and text extraction
-  3. **Go Audit Service:** Provides a read-only API for accessing translation session audit logs
-- **Supabase BaaS:** Used by all components for authentication, database, and file storage
-- **Asynchronous Processing:** Heavy PPTX processing tasks are handled asynchronously with job status tracking
+## 1. Architecture Overview
 
-## 2. Authentication Flow
-- Standard email/password authentication managed by Supabase Auth
-- Client-side Supabase SDK handles user sessions and authentication state
-- Protected routes in Next.js redirect unauthenticated users to the login page
-- Backend services validate Supabase JWT tokens for secure access
-- The Audit Service supports both JWT authentication and share token validation
+The PowerPoint Translator App follows a modern, distributed architecture with specialized components:
 
-## 3. Data Management & Storage
-- **PostgreSQL Database (Supabase):**
-    - `translation_sessions`: Stores metadata for each translation project
-    - `slides`: Stores metadata for each slide within a session, including the URL to its SVG representation and original dimensions
-    - `slide_shapes`: Stores data for each text element (and potentially other shape types) on a slide, including original/translated text, coordinates, and basic styling
-    - `audit_logs`: Stores detailed audit entries for all session activities
-    - `session_shares`: Stores share tokens for accessing sessions
-- **Supabase Storage:**
-    - `presentations` (or similar bucket): Stores uploaded original PPTX files
-    - `slide_visuals`: Stores server-generated SVG files for each slide
-    - `processing-results`: Stores JSON result files with processed data
-- **Row Level Security (RLS):** Implemented on Supabase tables to ensure users can only access and modify their own data
+```mermaid
+flowchart TD
+    subgraph Client ["Next.js Frontend (App Router)"]
+        UI["UI Components"]
+        Store["Zustand Store"]
+        Hooks["Custom Hooks"]
+        Router["Next.js Router"]
+    end
+    
+    subgraph Backend ["Backend Services"]
+        subgraph PPTXProcessor ["PPTX Processor Service (Python/FastAPI)"]
+            PPTXEndpoints["REST API Endpoints"]
+            ProcessingEngine["PPTX Processing Engine"]
+            LibreOffice["LibreOffice Integration"]
+            ElementTree["ElementTree Fallback"]
+        end
+        
+        subgraph AuditService ["Audit Service (Go/Gin)"]
+            AuditEndpoints["REST API Endpoints"]
+            AuditRepo["Repository Layer"]
+            AuthMiddleware["Auth Middleware"]
+        end
+        
+        subgraph TranslationSessionService ["Translation Session Service (Hono.js/Bun.js)"]
+            TSS_API["REST API Endpoints"]
+            TSS_DB["Supabase DB Interaction"]
+            TSS_Auth["JWT Authentication"]
+        end
+        
+        subgraph Supabase ["Supabase BaaS"]
+            Auth["Authentication"]
+            DB["PostgreSQL Database"]
+            Storage["File Storage"]
+            RealTime["Real-time Subscriptions"]
+        end
+    end
+    
+    Client --> Backend
+    UI --> Store
+    Hooks --> Store
+    PPTXProcessor --> Supabase
+    AuditService --> Supabase
+    TranslationSessionService --> Supabase
+    Client --> Supabase
+```
 
-## 4. PPTX Processing Pipeline
-1. **Upload:** User uploads a PPTX file via the `UploadWizard` in the Next.js frontend
-2. **Session Creation:** A `translation_sessions` record is created in Supabase
-3. **Processing Request:** The frontend makes a request to the Python processor service `/v1/process` endpoint with the PPTX file and session metadata
-4. **Background Processing:** The processor service:
-   - Saves the file temporarily
-   - Queues a background task for processing
-   - Returns a job ID and estimated completion time
-5. **PPTX Conversion:**
-   - The processor converts each slide to SVG using LibreOffice (with ElementTree fallback)
-   - Text elements, their content, coordinates, and styling are extracted
-   - SVGs are uploaded to Supabase Storage
-   - Slide metadata and text elements are saved to Supabase database tables
-6. **Status Tracking:** The frontend periodically polls the processor's status endpoint to check progress
-7. **Completion:** Once processing is complete, the frontend can navigate to the editor
+## 2. Application Patterns
 
-## 5. Audit Logging System
-The Audit Service provides a dedicated microservice for tracking and retrieving audit logs for translation sessions:
+### 2.1 Frontend Architecture
 
-1. **Log Generation:** Activities performed by users (edit, comment, share, etc.) generate audit log entries in the `audit_logs` table
-2. **Log Structure:** Each audit entry contains:
-   - Session ID and User ID
-   - Type (create, edit, merge, comment, etc.) - consistent field naming using 'type' across frontend and backend
-   - Timestamp
-   - Detailed JSON payload with action-specific data
-   - IP address and user agent information
+1. **Next.js App Router Structure:**
+   - Page-based routing with nested route segments
+   - Route handlers for API endpoints
+   - Server and Client Components using the "use client" directive
 
-3. **Access Control:**
-   - Session owners have full access to view all audit logs
-   - Users with share tokens have limited access based on permissions
-   - JWT validation ensures secure access to audit data
+2. **Component Hierarchy:**
+   - Layout components for consistent page structure
+   - UI components from shadcn/ui for consistent design
+   - Page-specific components for specialized functionality
+   - Shared components for common patterns
 
-4. **API Endpoints:**
-   - `/api/v1/sessions/:sessionId/history`: Retrieves paginated audit logs for a specific session
-   - `/api/v1/events`: Creates new audit events with type and details
+3. **State Management with Zustand:**
+   - **Modular Slice Architecture:** (ENHANCED WITH ADVANCED FEATURES)
+     - Separate store slices for different domains:
+       - `session-slice.ts`: User session, roles, and permissions
+       - `slides-slice.ts`: Slide data, current slide, and navigation
+       - `edit-buffers-slice.ts`: Tracking unsaved text edits
+       - `comments-slice.ts`: Comments on slides and shapes
+       - `notifications-slice.ts`: System and comment notifications
+       - `merge-slice.ts`: Merge operations and shape selection
+       - `share-slice.ts`: Session sharing functionality
+       - `translation-sessions-slice.ts`: Translation session management
+       - `migration-slice.ts`: Schema migration handling
+       - `network-slice.ts`: Online/offline state tracking
+       - `offline-queue-slice.ts`: Queue for offline operations
+       - `subscription-slice.ts`: Selective subscription management
+     - Main store combines slices using Zustand's create function
+   
+   - **Store Structure:**
+     ```
+     lib/store/
+     ├── index.ts            # Main store creation and exports
+     ├── README.md           # Comprehensive documentation
+     ├── types.ts            # Type definitions for all slices
+     ├── slices/
+     │   ├── session-slice.ts
+     │   ├── slides-slice.ts
+     │   ├── edit-buffers-slice.ts
+     │   ├── comments-slice.ts
+     │   ├── notifications-slice.ts
+     │   ├── merge-slice.ts
+     │   ├── share-slice.ts
+     │   ├── translation-sessions-slice.ts
+     │   ├── migration-slice.ts
+     │   ├── network-slice.ts
+     │   ├── offline-queue-slice.ts
+     │   └── subscription-slice.ts
+     ├── migrations/
+     │   ├── index.ts        # Migration registry
+     │   └── v2-add-comment-color.ts # Example migration
+     └── utils/
+         ├── network-listeners.ts    # Network event setup
+         └── subscription-manager.ts # Subscription utilities
+     ```
+   
+   - **Enhanced Store Features:**
+     - **Schema Migration System**: Automatic migration handling for store structure changes
+     - **Comprehensive Error Handling**: Standardized error states across all slices
+     - **Offline Queue**: Automatic operation queueing during network outages
+     - **Selective Subscriptions**: Performance-optimized real-time updates (fully implemented, tested, and documented)
+     - **Network State Management**: Automatic online/offline detection
+     - **Persistence**: Enhanced localStorage persistence with migration support
+     - **Type Safety**: Comprehensive TypeScript definitions and conflict resolution
 
-5. **Data Integrity:**
-   - Audit logs are immutable once created
-   - Historical data is preserved for accountability and tracking
+4. **Form Management:**
+   - React Hook Form for form state
+   - Zod for validation schema
+   - Controlled components for complex inputs
 
-6. **Frontend Integration:**
-   - `AuditQueueService` handles reliable submission of audit events with offline support and retries
-   - `AuditServiceClient` provides direct API communication
-   - `useAuditLog` React hook for components to log events and retrieve history
-   - Consistent field naming convention using 'type' instead of 'action' for event categorization
+5. **Navigation Patterns:**
+   - Next.js `useRouter` for programmatic navigation
+   - Link component for declarative navigation
+   - Dynamic route parameters for session and slide IDs
 
-7. **Test Session Support:**
-   - Special "test-*" session ID pattern for development and testing
-   - In-memory storage for test events
-   - Bypasses authentication requirements
+### 2.2 Backend Architecture
 
-## 6. PPTX Processor Service Architecture
-The processor service follows a clean architecture pattern:
+1. **Microservice Pattern:**
+   - Dedicated services for specific domains:
+     - PPTX Processor Service for presentation processing
+     - Audit Service for activity logging
+   - Independent deployment and scaling
+   - Domain-specific technology choices
 
-1. **API Layer (`app/api/routes/`):**
-   - `processing.py`: Handles file uploads and initiates processing
-   - `status.py`: Provides job status and results endpoints
-   - `health.py`: Service health monitoring
+2. **PPTX Processor Service Patterns:**
+   - RESTful API with FastAPI
+   - Background task processing with job management
+   - **UNO API Integration**: Individual slide processing via unoserver connection
+   - **Multi-slide Export**: 100% success rate using LibreOffice UNO API
+   - Enhanced text extraction with translation-optimized metadata
+   - **Fallback Strategy**: Graceful degradation to LibreOffice batch processing
+   - **Production Architecture**: Clean, organized codebase structure
+   - Job status tracking
+   - Error handling and retries
+   - **PPTX Export Functionality (NEW):**
+     - Export API endpoints (`/v1/export`, `/v1/export/{session_id}/download`)
+     - Background export job processing with status tracking
+     - PPTX file generation from translated slide data
+     - Secure download URL generation with expiration
+     - Integration with existing job management system
+     - End-to-end export workflow from frontend to download
 
-2. **Service Layer (`app/services/`):**
-   - `pptx_processor.py`: Core processing logic, orchestrates the conversion pipeline
-   - `job_status.py`: Manages processing job status with in-memory and file-based storage
-   - `supabase_service.py`: Handles interaction with Supabase (storage, database)
-   - `results_service.py`: Manages retrieval and reconstruction of processing results
+3. **Audit Service Patterns:**
+   - RESTful API with Gin
+   - Repository pattern for data access
+   - Middleware chain for request processing
+   - JWT validation with caching
+   - Structured logging
+   - Error handling middleware
 
-3. **Data Models (`app/models/schemas.py`):**
-   - `ProcessingResponse`: API response for job initiation
-   - `ProcessingStatusResponse`: Status check response
-   - `ProcessedPresentation`: Complete presentation data
-   - `ProcessedSlide`: Individual slide data
-   - `SlideShape`: Text and image element data
+4. **Share Service Patterns (IN DEVELOPMENT):**
+   - RESTful API with Hono.js
+   - Bun.js runtime for performance
+   - JWT-based token system for secure sharing
+   - Permission-based access control
+   - Middleware for token validation
+   - Integration with Supabase for storage and authentication
+   - Rate limiting for security
 
-4. **SVG Generation System:**
-   - **Primary Method:** LibreOffice conversion via subprocess
-   - **Fallback Method:** Custom ElementTree-based SVG generation
-   - **Hybrid Approach:** Attempts LibreOffice first, falls back to ElementTree if needed
+5. **Translation Session Service Patterns (NEW):**
+   - RESTful API with Hono.js for managing translation session lifecycle and metadata.
+   - Bun.js runtime for performance.
+   - JWT-based authentication (Supabase JWTs) to identify users and authorize actions.
+   - CRUD operations for translation sessions (create, read, update, delete).
+   - Stores translation session metadata in a dedicated `translation_sessions` table in Supabase.
+   - Interacts with the frontend to provide data for dashboards and the editor.
+   - Simple business logic focused on core session management for MVP.
 
-5. **Job Management:**
-   - Background tasks using FastAPI's `BackgroundTasks`
-   - Status tracking with in-memory dictionary and file-based backup
-   - Retry mechanism for failed jobs
+6. **Supabase Integration Patterns:**
+   - Authentication via Supabase Auth
+   - Database access via Supabase client
+   - File storage in Supabase Storage
+   - Row-level security (RLS) policies for data protection
+   - Database triggers for audit events
+   - Supabase client for browser and server
 
-## 7. Audit Service Architecture
-The Audit Service follows a clean, layered architecture pattern in Go:
+### 2.3 Data Flow Patterns
 
-1. **API Layer (`internal/handlers/`):**
-   - `audit_handler.go`: Handles HTTP requests related to audit logs
-   - `events_handler.go`: Handles event creation requests
-   - RESTful API with JWT authentication and pagination
+1. **Slide Processing & Session Creation Flow:**
+   ```mermaid
+   sequenceDiagram
+       Client->>PPTX Service: Upload PPTX file
+       PPTX Service->>UnoServer: Connect via UNO API bridge
+       PPTX Service->>UnoServer: Export each slide individually to SVG
+       UnoServer->>PPTX Service: Return individual SVG files (100% success)
+       PPTX Service->>PPTX Service: Enhanced text extraction with coordinates
+       PPTX Service->>Supabase Storage: Store all SVGs
+       PPTX Service->>Supabase DB: Store slide & shape data with validation
+       PPTX Service->>Client: Return job status & core slide info (slide_count, original_file_name)
+       Client->>TranslationSessionService: Create Session (name, lang, slide_count, etc.)
+       TranslationSessionService->>Supabase DB: Store session metadata in 'translation_sessions' table
+       TranslationSessionService->>Client: Return created session
+       Client->>Supabase DB: Query processed slides for editor
+       Client->>Supabase Storage: Fetch SVGs for editor
+       Client->>Client: Render slides with editable overlays
+   ```
 
-2. **Service Layer (`internal/service/`):**
-   - `audit_service.go`: Business logic for retrieving and filtering audit logs
-   - Handles authorization checks based on user roles and permissions
+2. **Text Editing Flow:**
+   ```mermaid
+   sequenceDiagram
+       User->>SlideCanvas: Click text shape
+       SlideCanvas->>EditDialog: Open with shape data
+       User->>EditDialog: Edit text
+       EditDialog->>Store: Update edit buffer
+       Store->>EditDialog: Reflect changes
+       User->>EditDialog: Save changes
+       EditDialog->>Store: Update slide shape text
+       Store->>Supabase DB: Save changes
+       Store->>AuditService: Log edit action
+   ```
 
-3. **Repository Layer (`internal/repository/`):**
-   - `audit_repository.go`: Data access layer for interacting with Supabase
-   - `supabase_client.go`: HTTP client for Supabase REST API
+3. **PPTX Export Flow (NEW):**
+   ```mermaid
+   sequenceDiagram
+       User->>Editor: Click "Export PPTX"
+       Editor->>PptxClient: exportPptx(sessionId)
+       PptxClient->>PPTX Service: POST /v1/export
+       PPTX Service->>Background Job: Start export task
+       PPTX Service->>Editor: Return job_id and status
+       Editor->>Editor: Show loading state
+       loop Status Polling
+           Editor->>PptxClient: Check job status
+           PptxClient->>PPTX Service: GET /v1/jobs/{job_id}
+           PPTX Service->>Editor: Return job status
+       end
+       Background Job->>Supabase DB: Fetch session and slide data
+       Background Job->>Background Job: Generate PPTX with translated text
+       Background Job->>Supabase Storage: Store completed PPTX file
+       Background Job->>PPTX Service: Update job status to completed
+       Editor->>PptxClient: getExportDownloadUrl(sessionId)
+       PptxClient->>PPTX Service: GET /v1/export/{session_id}/download
+       PPTX Service->>Editor: Return secure download URL
+       Editor->>User: Show download notification with link
+       User->>Browser: Click download link
+       Browser->>Supabase Storage: Download PPTX file
+   ```
 
-4. **Domain Models (`internal/domain/`):**
-   - `audit.go`: Core domain entities (AuditEntry, AuditResponse) with 'Type' field for event type
-   - `errors.go`: Domain-specific error types and error handling
+4. **Audit Logging Flow:**
+   ```mermaid
+   sequenceDiagram
+       User->>Component: Perform action
+       Component->>Hook: Call useAuditLog()
+       Hook->>AuditService: Send log entry
+       AuditService->>Auth: Validate JWT
+       AuditService->>DB: Store log entry
+       AuditService->>Component: Return success
+       Component->>User: Action completed
+   ```
 
-5. **Middleware (`internal/middleware/`):**
-   - `auth.go`: JWT validation and share token verification
-   - `request_id.go`: Request ID generation and tracking
-   - `logger.go`: Structured logging
-   - `error_handler.go`: Consistent error response formatting
+### 2.4 Authentication & Authorization Patterns
 
-6. **Utility Packages (`pkg/`):**
-   - `jwt/`: JWT token validation
-   - `cache/`: In-memory caching for tokens
-   - `logger/`: Logging utilities
+1. **Authentication Flow:**
+   - Supabase Auth for user management
+   - JWT tokens for API authentication
+   - Auth server middleware for validation
+   - Protected routes in Next.js
 
-7. **Configuration (`internal/config/`):**
-   - Environment-based configuration with reasonable defaults
-   - Support for both local development and production environments
+2. **Role-Based Access:**
+   - UserRole: owner, reviewer, viewer
+   - Permission checking in components and API routes
+   - Row-level security in Supabase
 
-## 8. Slide Rendering & Interaction Pattern
-1. **Slide Data Fetching:** The editor fetches `ProcessedSlide` data from Supabase (which includes the `svg_url` and an array of `SlideShape` objects)
-2. **Canvas Rendering:** The `SlideCanvas` component:
-   - Renders the `svg_url` as a background image, maintaining its aspect ratio
-   - For each text `SlideShape`, positions a transparent HTML overlay on top of the SVG using the extracted coordinates
-   - Makes these overlays interactive, allowing users to click and trigger a text editing dialog
-3. **Text Editing:** User edits translations in a dialog. Saved translations update the `translated_text` field in the `slide_shapes` table in Supabase
+3. **Share Token System:**
+   - Share tokens for reviewer access
+   - Time-limited tokens with specific permissions
+   - Token validation in middleware
 
-## 9. UI Structure & State Management
-- **Component-Based Architecture:** Utilizing shadcn/ui components and custom React components for modularity and reusability
-- **Routing:** Next.js App Router for file-system based routing
-- **Client-Side State:** React hooks (`useState`, `useEffect`) for local component state
-- **Server Components & Client Components:** Leveraging Next.js App Router features for optimal rendering strategies. Interactive UI elements are Client Components. Data fetching can occur in Server Components
+## 3. Key Design Patterns
 
-## 10. API Interaction Patterns
-- **Next.js to Processor Service:** REST API calls for PPTX processing and status checking
-- **Next.js to Audit Service:** REST API calls for fetching audit logs
-- **Supabase Client SDK:** Used by frontend and backend services for interaction with Supabase services (Auth, DB, Storage)
-- **Next.js Route Handlers:** Used for custom backend logic within the Next.js application
-- **Server Actions:** Considered for form submissions and mutations that don't require complex request/response cycles
+1. **Slice Pattern (State Management):**
+   - Modular state management with Zustand slices
+   - Each slice manages a specific domain
+   - Slices combined into a single store
+   - Custom hooks for accessing slices
 
-## 11. Error Handling Strategy
-- **Frontend:** Structured error handling with user-friendly error messages
-- **PPTX Processor Service:** 
-  - Error logging with detailed context information
-  - Fallback mechanisms for key components (SVG generation)
-  - Job retry capabilities for transient issues
-- **Audit Service:**
-  - Domain-specific error types mapped to appropriate HTTP status codes
-  - Middleware-based error handling for consistent error responses
-  - Detailed logging with request IDs for traceability
-- **Client-Side Resilience:** Retry logic and fallback UIs for temporary service unavailability
-  - `AuditQueueService` implements offline queue and retry mechanism
-  - Graceful degradation with informative error messages
-  - Recovery strategies for network interruptions
+2. **Migration Pattern (Schema Evolution):**
+   - Version-based schema migration system
+   - Sequential migration execution with rollback protection
+   - Automatic migration detection and execution on store hydration
+   - Migration registry for centralized management
+   - Type-safe migration functions with error handling
+
+3. **Offline-First Pattern:**
+   - Automatic operation queueing during network outages
+   - FIFO processing of queued operations on reconnection
+   - Retry logic with exponential backoff
+   - Persistent queue storage across app restarts
+   - Network state detection with automatic recovery
+
+4. **Error Recovery Pattern:**
+   - Comprehensive error state tracking across all slices
+   - Optimistic update reversal on operation failure
+   - Standardized error handling with user-friendly messages
+   - Error boundary integration with store error states
+   - Automatic retry mechanisms for transient failures
+
+5. **Selective Subscription Pattern:**
+   - Dynamic subscription management for performance optimization (fully implemented, tested, and documented)
+   - Channel-specific subscription activation/deactivation
+   - Session-scoped subscriptions for multi-tenant environments
+   - Automatic cleanup to prevent memory leaks
+   - Filtered event handling for relevant updates only
+
+6. **Persistence Pattern (State Storage):**
+   - Using Zustand persist middleware with migration support
+   - Selective state persistence via partialize
+   - Version tracking for migration compatibility
+   - Storage adapter pattern for different environments
+   - Cross-session state survival with cleanup mechanisms
+
+7. **Real-time Synchronization Pattern:**
+   - Supabase real-time channels for database changes
+   - Event-based subscription model with selective filtering
+   - Channel management with lifecycle hooks
+   - Handlers for different event types (INSERT, UPDATE, DELETE)
+   - Component-level cleanup to prevent memory leaks
+
+8. **Optimistic Updates Pattern:**
+   - Immediate UI updates before server confirmation
+   - Tracking pending/sync status with UI indicators
+   - Error handling with fallback to previous state
+   - Background server synchronization
+   - Loading states with fallback UI
+
+9. **Drag-and-Drop Pattern:**
+   - Using @hello-pangea/dnd for smooth drag interactions
+   - Droppable context for drop targets
+   - Draggable components for interactive elements
+   - Store integration for persistence of reordered items
+   - Optimistic UI updates during drag operations
+   - Server synchronization after reordering
+
+10. **Repository Pattern (Audit Service):**
+    - Abstracts data access logic
+    - Enables swapping implementations
+    - Centralizes query logic
+
+11. **Middleware Pattern (API Services):**
+    - Chainable request processing
+    - Cross-cutting concerns (auth, logging, error handling)
+    - Consistent request flow
+
+12. **Background Processing Pattern (PPTX Service):**
+    - Async task handling
+    - Job status tracking
+    - Retry mechanisms
+
+13. **Hybrid Rendering Pattern (Frontend):**
+    - SVG backgrounds from processed slides
+    - HTML overlays for interactive elements
+    - Position matching based on coordinates
+
+14. **Event Sourcing (Audit Logging):**
+    - Capturing all state-changing events
+    - Reconstructing state from event log
+    - Immutable event history
+
+## 4. Communication Patterns
+
+1. **API Communication:**
+   - RESTful endpoints for service interaction
+   - JSON payload format
+   - HTTP status codes for error handling
+   - Query parameters for filtering and pagination
+
+2. **Real-time Updates:**
+   - Supabase real-time subscriptions
+   - Channel-based data segmentation
+   - Optimistic local updates
+   - Eventual consistency model
+   - Error recovery mechanisms
+
+3. **Error Handling:**
+   - Consistent error response format
+   - Client-side error handling with fallbacks
+   - Detailed error logging
+   - User-friendly error messages
+
+## 5. Deployment Patterns
+
+1. **Containerization:**
+   - Docker for service packaging
+   - Container orchestration for deployment
+   - Environment-specific configurations
+
+2. **CI/CD:**
+   - Automated testing and building
+   - Deployment pipelines
+   - Environment promotion
+
+3. **Environment Strategy:**
+   - Development, staging, and production environments
+   - Environment-specific configurations
+   - Feature flags for controlled rollout
+
+## 6. Testing Patterns
+
+1. **Component Testing:**
+   - React Testing Library for component tests
+   - Mock store for state management testing
+   - Snapshot testing for UI consistency
+
+2. **API Testing:**
+   - Integration tests for API endpoints
+   - Mock external dependencies
+   - Test coverage for critical paths
+
+3. **End-to-End Testing:**
+   - Cypress for full application testing
+   - User journey testing
+   - Visual regression testing

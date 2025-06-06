@@ -7,17 +7,30 @@
     - Client-side: Next.js 14 (App Router) with React/TypeScript.
     - BaaS: Supabase for Auth, Database (PostgreSQL), and Storage.
     - Slide Rendering: High-fidelity approach using server-side conversion of PPTX slides to SVG images. SVGs are displayed as backgrounds in the client, with interactive HTML overlays for text elements positioned based on extracted coordinates.
+    - State Management: Zustand for centralized, lightweight state management with modular slice architecture.
 - **Technology Stack Preference:**
     - Next.js (App Router preferred over Pages Router).
     - TypeScript for type safety.
     - Tailwind CSS for styling.
     - shadcn/ui for accessible and customizable UI components.
     - Supabase for backend services.
+    - Zustand for state management (chosen for minimal boilerplate and excellent TypeScript support).
+- **State Management Pattern:**
+    - **Modular Slices:** Separate state slices for different domains (session, slides, edit buffers, comments, notifications, merge operations).
+    - **Type-First Approach:** Comprehensive TypeScript interfaces defined before implementation.
+    - **Co-located Actions:** Actions defined alongside state in each slice for clarity.
+    - **Store Structure:** lib/store/ directory with types.ts and slices/ subdirectory.
+    - **Custom Hooks:** Implemented useAppStore, useSession, useSlides, etc. for clean component integration.
+    - **Persistence Strategy:** Using localStorage with Zustand persist middleware for cross-session survival.
+    - **Real-time Synchronization:** Supabase real-time channels with optimistic updates pattern.
+    - **Error Handling:** Fallback UI and error states for graceful degradation.
+    - **Component Integration:** All major components now use the store directly instead of local state.
 - **User Experience (UX) Priorities:**
     - **Intuitive Workflow:** The user journey from upload to translation to export should be clear and straightforward.
     - **Visual Fidelity:** The editor should represent the original slide as accurately as possible.
     - **Efficiency:** Minimize clicks and streamline tasks.
     - **Professionalism:** Clean, modern, and reliable interface.
+    - **Real-time Updates:** State changes should reflect immediately across all components.
 - **Critical Implementation Path:** The server-side PPTX to SVG conversion and data extraction pipeline is the most critical and complex part of the system. The frontend design heavily relies on the output of this process.
 - **Development Challenge:** Implementing or integrating the aforementioned PPTX processing backend, as it requires tools/binaries not readily available in standard serverless/Next.js Lite environments. This will likely involve a separate microservice or a specialized cloud function with a custom runtime.
 - **v0 Interaction Notes:**
@@ -25,12 +38,31 @@
     - Utilize shadcn/ui components where appropriate, importing them from `@/components/ui`. Do not regenerate shadcn component code.
     - Prefer Server Components for data fetching and rendering static content; use Client Components (`'use client'`) for interactivity and state management.
     - For Supabase interactions, use the provided client and server helper functions (`lib/supabase/client.ts`, `lib/supabase/server.ts`).
+    - For state management, use Zustand store hooks instead of local useState when dealing with shared state.
 - **Code Style Preferences:**
     - Use kebab-case for file names (e.g., `login-form.tsx`).
     - Employ descriptive variable and function names.
     - Follow ESLint/Prettier configurations if provided (assume standard Next.js setup).
+    - For Zustand slices, use the pattern: `create[Domain]Slice` (e.g., `createSessionSlice`).
 - **Evolution of Decisions:**
     - Initial thought might have been simpler client-side rendering, but shifted to server-side SVG conversion for higher visual fidelity as per user request. This significantly impacts the `SlideCanvas` design and data requirements.
+    - Started with React's built-in state management, but evolved to Zustand for better scalability and centralized state management as the app complexity grew.
+    - Enhanced Zustand implementation with persistence, real-time synchronization, and optimistic updates to provide a more responsive user experience.
+    - Added drag-and-drop functionality for slide reordering using @hello-pangea/dnd integrated with Zustand for state persistence.
+    - **PPTX Export Implementation:** Successfully implemented end-to-end export functionality by extending the existing PPTX Processor service rather than creating a separate service. This leveraged existing LibreOffice integration, job management system, and UI patterns for faster implementation.
+- **PPTX Export Patterns (NEW):**
+    - **Extend Existing Services:** When adding new functionality, prefer extending existing services that already have the required infrastructure (LibreOffice, job tracking, etc.) over creating new services.
+    - **Job-Based Processing:** Long-running operations like PPTX export should use background job processing with status tracking and polling.
+    - **Secure Downloads:** Generate time-limited, secure download URLs rather than direct file access for exported files.
+    - **UI Progress Tracking:** Implement real-time status polling with loading states, progress indicators, and user-friendly notifications.
+    - **Placeholder Integration Pattern:** Use placeholder functions in service implementations to enable immediate frontend integration, then replace with actual data connections iteratively.
+    - **Status-Based Workflows:** Export functionality should respect session status (e.g., disable export for incomplete sessions) to maintain data integrity.
+- **Implementation Success Patterns:**
+    - **Rapid MVP Delivery:** Focus on getting core functionality working end-to-end before adding advanced features.
+    - **Type-First Development:** Define TypeScript interfaces for new features before implementation to ensure consistency across frontend and backend.
+    - **Error Handling First:** Implement comprehensive error handling and user feedback from the start, not as an afterthought.
+    - **Existing Infrastructure Leverage:** Reuse existing patterns (job management, API client structure, UI notification systems) for consistency and speed.
 - **Tool Usage Patterns:**
     - Supabase dashboard for managing users, database schema, and storage.
     - v0 AI for code generation and iteration.
+    - Zustand devtools for debugging state changes (to be integrated).

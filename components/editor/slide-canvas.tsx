@@ -6,11 +6,13 @@ import type { ProcessedSlide } from "@/types"
 import { Card, CardContent } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 import Image from "next/image" // For displaying the SVG via URL
+import { Badge } from "@/components/ui/badge" // Import Badge for auto-translation indicator
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip" // Import Tooltip
 
 interface SlideCanvasProps {
   slide: ProcessedSlide | null
   editable: boolean
-  onTextClick: (shapeId: string, originalText: string, currentTranslation?: string) => void
+  onTextClick: (shapeId: string, originalText: string, currentTranslation?: string, shapeData?: any) => void
   showReadingOrder: boolean
   // scale prop might be less relevant if SVG scales within aspect ratio container
 }
@@ -48,8 +50,8 @@ export default function SlideCanvas({ slide, editable, onTextClick, showReadingO
         <Image
           src={slide.svg_url || "/placeholder.svg"}
           alt={`Slide ${slide.slide_number}`}
-          layout="fill"
-          objectFit="contain" // 'contain' ensures the whole SVG is visible within the aspect ratio
+          fill
+          className="object-contain" // 'contain' ensures the whole SVG is visible within the aspect ratio
           priority // Prioritize loading current slide image
         />
 
@@ -60,6 +62,10 @@ export default function SlideCanvas({ slide, editable, onTextClick, showReadingO
             // Other shapes (images, etc.) are assumed to be part of the SVG background
             return null
           }
+
+          // Check if this shape has auto-translated text
+          const isAutoTranslated = shape.is_auto_translated || 
+                                   (shape.translated_text && shape.translated_metadata?.is_auto_translated);
 
           let shapeStyle: React.CSSProperties = {}
           if (shape.coordinates_unit === "percentage") {
@@ -102,30 +108,58 @@ export default function SlideCanvas({ slide, editable, onTextClick, showReadingO
               onClick={() =>
                 editable &&
                 shape.original_text &&
-                onTextClick(shape.id, shape.original_text, shape.translated_text || undefined)
+                onTextClick(
+                  shape.id, 
+                  shape.original_text, 
+                  shape.translated_text || undefined,
+                  {
+                    reading_order: shape.reading_order,
+                    shape_type: shape.type,
+                    is_auto_translated: isAutoTranslated,
+                    position: {
+                      x: shape.x_coordinate,
+                      y: shape.y_coordinate,
+                      width: shape.width,
+                      height: shape.height,
+                      unit: shape.coordinates_unit
+                    }
+                  }
+                )
               }
               title={editable && shape.original_text ? "Click to edit text" : ""}
             >
               {/* Transparent overlay for interaction, with optional debug border */}
-              <div
-                className={cn(
-                  "w-full h-full border border-transparent", // Transparent border by default
-                  editable &&
-                    shape.original_text &&
-                    "group-hover:border-primary group-hover:bg-primary/10 transition-colors duration-150 ease-in-out", // Visible border on hover
-                )}
-              >
-                {/*
-                  Optionally, display the text here for quick reference or if SVG text rendering is imperfect.
-                  However, the SVG is the source of visual truth. This text is for interaction.
-                  Keep it minimal or style it to be very subtle.
-                */}
-                {/*
-                <div className="truncate text-xs text-transparent group-hover:text-muted-foreground p-0.5">
-                  {shape.translated_text || shape.original_text}
-                </div>
-                */}
-              </div>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div
+                      className={cn(
+                        "w-full h-full border border-transparent relative", // Transparent border by default
+                        editable &&
+                          shape.original_text &&
+                          "group-hover:border-primary group-hover:bg-primary/10 transition-colors duration-150 ease-in-out", // Visible border on hover
+                        isAutoTranslated && "border-yellow-400/50 bg-yellow-400/10", // Highlight auto-translated text
+                      )}
+                    >
+                      {isAutoTranslated && (
+                        <Badge 
+                          variant="outline" 
+                          className="absolute -top-2 -right-2 z-20 bg-yellow-100 text-yellow-800 border-yellow-300 text-[10px] px-1 py-0"
+                        >
+                          Auto
+                        </Badge>
+                      )}
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="text-xs">
+                    {isAutoTranslated 
+                      ? "This text was automatically translated. Click to review." 
+                      : shape.translated_text 
+                        ? "Text has been translated" 
+                        : "Text needs translation"}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
 
               {showReadingOrder && (
                 <span

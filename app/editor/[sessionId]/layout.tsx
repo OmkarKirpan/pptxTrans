@@ -8,14 +8,14 @@ export const metadata: Metadata = {
   description: "Translate your PowerPoint slides with precision and ease",
 };
 
-export default function EditorLayout({
+export default async function EditorLayout({
   children,
   params,
 }: {
   children: React.ReactNode;
   params: { sessionId: string };
 }) {
-  const { sessionId } = params;
+  const { sessionId } = await params;
 
   return (
     <div className="relative">

@@ -1,0 +1,46 @@
+[project]
+name = "pptx-processor-service"
+version = "0.1.0"
+description = "PPTX to SVG processor with LibreOffice and enhanced text extraction for translation workflows"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "aiofiles>=23.2.1",
+    "fastapi>=0.103.1",
+    "fuzzywuzzy>=0.18.0",
+    "httpx>=0.25.0",
+    "pillow>=10.0.0",
+    "psutil>=7.0.0",
+    "pydantic>=2.4.2",
+    "pydantic-settings>=2.0.3",
+    "pytest>=7.4.2",
+    "python-dotenv>=1.0.0",
+    "python-json-logger>=3.3.0",
+    "python-levenshtein>=0.27.1",
+    "python-multipart>=0.0.6",
+    "python-pptx>=0.6.21",
+    "requests>=2.32.3",
+    "ruff>=0.11.13",
+    "storage3>=0.5.4",
+    "supabase>=1.0.3",
+    "uvicorn>=0.23.2",
+    "defusedxml",
+    "lxml",
+    "aiohttp",
+    "loguru",
+    "pytest-asyncio>=1.0.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short --strict-markers"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests"
+]

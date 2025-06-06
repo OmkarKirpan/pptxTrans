@@ -14,16 +14,22 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { createClient } from "@/lib/supabase/client"
 import { ThemeToggle } from "@/components/theme-toggle"
-import { LogOut, PlusCircle, Settings, UserCircle, LayoutDashboard } from "lucide-react"
+import { LogOut, PlusCircle, Settings, UserCircle, LayoutDashboard, Bell, ChevronLeft } from "lucide-react"
 import type { User } from "@supabase/supabase-js"
+import { useNotifications } from "@/lib/store"
+import { ReactNode } from "react"
 
 interface DashboardHeaderProps {
-  user: User | null
+  user?: User | null
+  title?: string
+  showBackButton?: boolean
+  children?: ReactNode
 }
 
-export default function DashboardHeader({ user }: DashboardHeaderProps) {
+export default function DashboardHeader({ user, title, showBackButton, children }: DashboardHeaderProps) {
   const router = useRouter()
   const supabase = createClient()
+  const { unreadCount } = useNotifications()
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -42,18 +48,47 @@ export default function DashboardHeader({ user }: DashboardHeaderProps) {
 
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b bg-background/95 px-4 shadow-sm backdrop-blur-md sm:px-6 lg:px-8">
-      <Link href="/dashboard" className="flex items-center gap-2 text-xl font-semibold text-primary">
-        <LayoutDashboard className="h-6 w-6" />
-        <span>Translator Dashboard</span>
-      </Link>
-      <div className="flex items-center gap-4">
-        <ThemeToggle />
-        <Button asChild>
-          <Link href="/dashboard/new-session">
-            <PlusCircle className="mr-2 h-5 w-5" />
-            New Session
+      <div className="flex items-center gap-2">
+        {showBackButton && (
+          <Button variant="ghost" size="icon" onClick={() => router.back()}>
+            <ChevronLeft className="h-5 w-5" />
+          </Button>
+        )}
+        {title ? (
+          <h1 className="text-xl font-semibold">{title}</h1>
+        ) : (
+          <Link href="/dashboard" className="flex items-center gap-2 text-xl font-semibold text-primary">
+            <LayoutDashboard className="h-6 w-6" />
+            <span>Translator Dashboard</span>
           </Link>
+        )}
+      </div>
+      
+      <div className="flex items-center gap-4">
+        {/* Children for custom actions */}
+        {children}
+        
+        <ThemeToggle />
+        
+        {/* Notifications Button */}
+        <Button variant="ghost" className="relative" onClick={() => router.push("/dashboard/notifications")}>
+          <Bell className="h-5 w-5" />
+          {unreadCount > 0 && (
+            <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-xs font-bold text-destructive-foreground">
+              {unreadCount > 99 ? '99+' : unreadCount}
+            </span>
+          )}
         </Button>
+        
+        {!title && (
+          <Button asChild>
+            <Link href="/dashboard/new-session">
+              <PlusCircle className="mr-2 h-5 w-5" />
+              New Session
+            </Link>
+          </Button>
+        )}
+        
         {user && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

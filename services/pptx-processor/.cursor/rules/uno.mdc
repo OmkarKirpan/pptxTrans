@@ -1,0 +1,11 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+libreoffice is installed on the system
+uno is present in "/usr/lib/libreoffice/program"
+
+/home/ok/sans/omkar/pptxTransed/services/pptx-processor : which libreoffice soffice
+/usr/bin/libreoffice
+/usr/bin/soffice

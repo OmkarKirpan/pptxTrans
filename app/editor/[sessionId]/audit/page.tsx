@@ -1,27 +1,3 @@
-import { Metadata } from 'next';
-
-export const metadata: Metadata = {
-  title: 'Audit Log | PowerPoint Translator',
-  description: 'View audit history for your translation session',
-};
-
-export default function AuditLogPage({ params }: { params: { sessionId: string } }) {
-  const { sessionId } = params;
-  
-  return (
-    <div className="container py-10">
-      <h1 className="text-2xl font-bold mb-6">Audit Log</h1>
-      <p className="text-muted-foreground mb-8">
-        View the history of changes for session {sessionId}
-      </p>
-      
-      <div className="flex justify-center items-center h-[50vh]">
-        <AuditLogClientContent sessionId={sessionId} />
-      </div>
-    </div>
-  );
-}
-
 'use client';
 
 import { useEffect } from 'react';
@@ -40,6 +16,23 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from '@/components/ui/pagination';
+
+export default function AuditLogPage({ params }: { params: { sessionId: string } }) {
+  const { sessionId } = params;
+  
+  return (
+    <div className="container py-10">
+      <h1 className="text-2xl font-bold mb-6">Audit Log</h1>
+      <p className="text-muted-foreground mb-8">
+        View the history of changes for session {sessionId}
+      </p>
+      
+      <div className="flex justify-center items-center h-[50vh]">
+        <AuditLogClientContent sessionId={sessionId} />
+      </div>
+    </div>
+  );
+}
 
 function AuditLogClientContent({ sessionId }: { sessionId: string }) {
   const { 
@@ -163,8 +156,8 @@ function AuditLogClientContent({ sessionId }: { sessionId: string }) {
   };
 
   // Get action badge color based on action type
-  const getActionBadgeColor = (action: string) => {
-    switch (action) {
+  const getActionBadgeColor = (type: string) => {
+    switch (type) {
       case 'create':
         return 'bg-green-100 text-green-800';
       case 'edit':
@@ -226,8 +219,8 @@ function AuditLogClientContent({ sessionId }: { sessionId: string }) {
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
               <CardTitle className="text-base">
-                <Badge className={getActionBadgeColor(log.action)}>
-                  {log.action.charAt(0).toUpperCase() + log.action.slice(1)}
+                <Badge className={getActionBadgeColor(log.type)}>
+                  {log.type.charAt(0).toUpperCase() + log.type.slice(1)}
                 </Badge>
               </CardTitle>
               <span className="text-sm text-muted-foreground">

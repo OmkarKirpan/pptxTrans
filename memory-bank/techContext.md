@@ -1,203 +1,535 @@
 # Technical Context: PowerPoint Translator App
 
-## 1. Core Technologies
-- **Frontend Framework:** Next.js 14 (App Router) with React 18+ and TypeScript.
-- **Styling:** Tailwind CSS for utility-first styling, complemented by shadcn/ui for pre-built, accessible components.
-- **Backend-as-a-Service (BaaS):** Supabase
-    - **Authentication:** Supabase Auth for email/password login and user management.
-    - **Database:** Supabase PostgreSQL for storing user data, translation sessions, slide metadata, text elements, and comments.
-    - **Storage:** Supabase Storage for hosting original PPTX files, server-generated SVG slide representations, and potentially translated PPTX files.
-- **PPTX Processor Service:** Python FastAPI microservice
-    - **Core Libraries:** python-pptx for PPTX parsing, LibreOffice for high-quality conversion
-    - **Background Processing:** Asynchronous task handling with FastAPI BackgroundTasks
-    - **Supabase Integration:** Direct connection to Supabase for storage and database operations
-- **Audit Service:** Go microservice for audit log management
-    - **Framework:** Gin web framework for REST API endpoints
-    - **JWT Validation:** Custom JWT validator with caching
-    - **Supabase Integration:** HTTP client for Supabase REST API access
-- **State Management:** Primarily React's built-in context and state hooks (`useState`, `useEffect`, `useContext`). Complex global state might later involve Zustand or Jotai if deemed necessary.
+## 1. Technology Stack
 
-## 2. Key Libraries & Tools
-- **Server-Side PPTX Processing:**
-    - **Python FastAPI:** Framework for building the processor microservice
-    - **LibreOffice:** Used in headless mode for high-quality PPTX to SVG conversion
-    - **python-pptx:** For parsing PPTX files and extracting text and metadata
-    - **xml.etree.ElementTree:** For fallback SVG generation when LibreOffice isn't available
-    - **Pillow (PIL):** For image processing and thumbnail generation
-    - **Supabase Python SDK:** For storage and database operations from the processor
-    - **pydantic:** For data validation and settings management
-    - **uvicorn:** ASGI server for running the FastAPI application
-- **Audit Service:**
-    - **Gin:** Lightweight web framework for Go with middleware support
-    - **Zap:** High-performance logging library from Uber
-    - **Viper:** Configuration management
-    - **jwt-go:** JWT token parsing and validation
-    - **go-cache:** In-memory caching for tokens
-    - **testify:** Testing framework for Go
-    - **Swagger/OpenAPI:** API documentation
-    - **mockery:** For generating test mocks
-- **Frontend Libraries:**
-    - **shadcn/ui:** Component library built on Radix UI for accessible, customizable UI elements
-    - **PptxGenJS:** (Planned) For programmatically reconstructing PPTX files during export
-    - **Supabase JS SDK:** For authentication, database, and storage operations
+### 1.1 Frontend
 
-## 3. PPTX Processor Service Architecture
-- **API Endpoints:**
-    - `/v1/process`: Accepts PPTX files for processing
-    - `/v1/process/batch`: Handles batch processing of multiple files
-    - `/v1/status/{job_id}`: Check status of processing jobs
-    - `/v1/results/{session_id}`: Retrieve processing results
-    - `/v1/retry/{job_id}`: Retry failed jobs
-    - `/v1/health`: Service health check
-- **Core Components:**
-    - **pptx_processor.py:** Main processing logic
-    - **job_status.py:** Job status management with in-memory and file-based storage
-    - **supabase_service.py:** Supabase integration
-    - **results_service.py:** Result retrieval and reconstruction
-- **SVG Generation Strategy:**
-    - **Primary:** Batch LibreOffice conversion via subprocess for high-fidelity
-    - **Fallback:** Custom ElementTree SVG generation
-    - **Text Extraction:** Always uses python-pptx regardless of SVG generation method
-- **Data Flow:**
-    1. Upload PPTX file
-    2. Queue background processing task
-    3. Extract slide data and generate SVGs
-    4. Upload assets to Supabase Storage
-    5. Store metadata in Supabase Database
-    6. Update job status
-    7. Return results when complete
+- **Framework:** Next.js 14 (App Router)
+- **Language:** TypeScript
+- **Styling:** Tailwind CSS
+- **UI Components:** shadcn/ui (Radix UI-based components)
+- **State Management:** 
+  - Zustand (fully implemented with modular slices and comprehensive enhancements)
+  - Zustand/persist middleware for localStorage persistence with migration support
+  - Custom real-time synchronization service for Supabase with selective subscriptions
+  - Schema migration system for store evolution
+  - Comprehensive error handling and recovery mechanisms
+  - Offline queue for network outage resilience
+  - Network state detection and automatic reconnection
+  - Performance-optimized selective subscription management
+- **Form Management:** React Hook Form with Zod validation
+- **Data Fetching:** SWR for client-side fetching, Server Components for server-side
+- **Authentication:** Supabase Auth (JWT-based)
+- **API Client:** Custom HTTP client with Axios
+- **Image Handling:** Next.js Image component for optimized images
+- **File Handling:** React Dropzone for file uploads
+- **Icons:** Lucide React icons
+- **Animations:** Framer Motion for transitions
+- **Internationalization:** next-intl (planned for future)
+- **Real-time Updates:** Supabase Realtime with optimistic UI updates
 
-## 4. Audit Service Architecture
-- **API Endpoints:**
-    - `/api/v1/sessions/{sessionId}/history`: Retrieve audit history for a session
-    - `/api/v1/events`: Create new audit events with 'type' field and details
-    - `/health`: Service health check
-    - `/docs/*`: Swagger documentation
-- **Authentication Methods:**
-    - **JWT Tokens:** Validated against Supabase JWT secret
-    - **Share Tokens:** For limited access to specific sessions
-- **Core Components:**
-    - **Handlers:** HTTP request handlers for audit logs
-    - **Services:** Business logic for authorization and data access
-    - **Repository:** Data access layer for Supabase
-    - **Middleware:** Request processing, auth, error handling, logging
-    - **Domain Models:** Core business entities and errors
-- **Field Naming Convention:**
-    - Consistent use of 'type' field (instead of 'action') for event categorization across frontend and backend
-    - AuditEntry struct uses Type field in Go
-    - TypeScript interfaces use type field in frontend
-    - API payloads use 'type' for request/response consistency
-- **Frontend Integration:**
-    - AuditQueueService: Client-side queue for reliable event submission
-    - AuditServiceClient: API client for communicating with the service
-    - useAuditLog hook: React hook for logging events and retrieving history
-- **Performance Optimizations:**
-    - **Token Caching:** In-memory cache for validated tokens
-    - **Connection Pooling:** HTTP client connection reuse
-    - **Request Timeouts:** Configurable timeouts for external calls
-- **Error Handling:**
-    - Specific error messages for different failure scenarios
-    - Graceful degradation when service is unavailable
-    - Client-side retry mechanism for transient failures
-- **Deployment:**
-    - **Docker Container:** Containerized service with health checks
-    - **Graceful Shutdown:** Proper connection and resource cleanup
-    - **Environment-based Configuration:** Supports different environments
+### 1.2 Backend Services
 
-## 5. Development & Preview Environment
-- **v0 AI Assistant:** Code generation and iteration assistance.
-- **Next.js Development:** Local development with `next dev`
-- **PPTX Processor Service:** Local development with Python virtual environment
-    - Requires LibreOffice installation for full functionality
-    - Can run with fallback mechanisms for basic development
-- **Audit Service:** Local development with Go toolchain
-    - Go 1.2x with module support
-    - Makefile for common operations (build, test, run)
-    - Docker Compose for local environment
-- **Next.js Lite (v0 Preview):** The runtime environment for previews generated by v0. This environment has limitations for server-side execution of binaries, requiring the separate microservice approach.
+#### 1.2.1 PPTX Processor Service
 
-## 6. Technical Constraints & Considerations
-- **Microservice Architecture:** The separation of the PPTX processing and audit logging into their own microservices solves the challenges of running specialized tools like LibreOffice, which can't be executed within serverless functions, and provides better separation of concerns.
+- **Framework:** FastAPI (Python)
+- **Core Technologies:**
+  - **LibreOffice UNO API** via unoserver for multi-slide SVG conversion (100% success rate)
+  - python-pptx for PPTX parsing, enhanced text extraction, and PPTX export generation
+  - **UnoServer** for LibreOffice integration and individual slide processing
+  - Pillow for image processing
+  - python-multipart for file uploads
+  - aiofiles for async file handling
+  - supabase-py for Supabase integration
+  - **Export Capabilities:** Full PPTX export with translated content, job tracking, and secure downloads
+- **Architecture:** Production-ready with UNO API integration and fallback strategies
+- **Containerization:** Docker with LibreOffice and unoserver
+- **Deployment:** Docker Compose for local dev, Cloud Run for production (planned)
 
-- **Deployment Complexity:** The microservices require non-serverless environments, making deployment more complex than a standard Next.js application.
+#### 1.2.2 Audit Service
 
-- **API Communication:** Efficient and robust communication between the Next.js frontend and the microservices is critical, including proper handling of large file uploads and asynchronous processing.
+- **Framework:** Gin (Go)
+- **Libraries:**
+  - go-jwt for JWT validation
+  - pgx for PostgreSQL access
+  - zap for structured logging
+  - validator for request validation
+  - testify for testing
+  - swaggo for API documentation
+- **Containerization:** Docker
+- **Deployment:** Docker Compose for local dev, Cloud Run for production (planned)
 
-- **SVG Rendering & Interactivity:** Ensuring accurate and performant rendering of SVGs and interactive overlays for potentially many text elements per slide.
+#### 1.2.3 Share Service (IN DEVELOPMENT)
 
-- **Data Consistency:** Keeping client-side state, database records, and file storage in sync, especially during collaborative editing.
+- **Framework:** Hono.js (TypeScript)
+- **Runtime:** Bun.js
+- **Libraries:**
+  - @supabase/supabase-js for Supabase integration
+  - jose for JWT handling
+  - zod for validation
+  - pino for logging
+  - supertest for API testing
+- **Containerization:** Docker
+- **Deployment:** Docker Compose for local dev, Cloud Run for production (planned)
 
-- **Scalability:** While the MVP focuses on core features, the architecture should allow for future scaling of users and data. The microservices might need horizontal scaling for handling multiple concurrent operations.
+#### 1.2.4 Translation Session Service (NEW)
 
-- **Security:** All services must implement proper authentication and authorization checks when accessing Supabase resources.
+- **Framework:** Hono.js (TypeScript)
+- **Runtime:** Bun.js
+- **Libraries:**
+  - @supabase/supabase-js for Supabase integration
+  - jose for JWT handling (if needed, or Supabase client handles it)
+  - zod for validation
+  - pino or similar for logging (optional for MVP)
+- **Database:** Supabase (via `translation_sessions` table)
+- **Authentication:** Supabase JWT validation
+- **Containerization:** Docker (planned)
+- **Deployment:** Docker Compose for local dev, Cloud Run for production (planned)
 
-## 7. PPTX Processor Service Technical Details
-- **SVG Generation Methods:**
-    - **LibreOffice Approach:** Uses `subprocess.run()` to execute LibreOffice in headless mode with specific command-line arguments to convert PPTX to SVG.
-    - **ElementTree Approach:** Uses `xml.etree.ElementTree` to create SVG elements based on the extracted slide data.
+### 1.3 Backend as a Service (BaaS)
 
-- **Text Extraction Process:**
-    - Extracts text using `python-pptx` library to access slide objects and shapes.
-    - Captures text content, positioning, and styling information.
-    - Converts coordinates to percentages relative to slide dimensions for responsive rendering.
+- **Platform:** Supabase
+- **Database:** PostgreSQL
+- **Authentication:** Supabase Auth (JWT-based)
+- **Storage:** Supabase Storage (S3-compatible)
+- **Real-time:** Supabase Realtime (Postgres changes)
+- **Edge Functions:** Deno-based serverless functions (planned)
 
-- **Job Status Management:**
-    - In-memory storage with file-based backup for job status information.
-    - Allows checking status via API and retrying failed jobs.
+## 2. Development Setup
 
-- **Error Handling:**
-    - Robust error handling for file operations, LibreOffice execution, and Supabase interactions.
-    - Fallback mechanisms when primary methods fail.
-    - Detailed error logging for debugging.
+### 2.1 Local Environment
 
-- **Configuration Management:**
-    - Uses `pydantic_settings.BaseSettings` for strongly-typed configuration from environment variables.
-    - Centralizes configuration in `app/core/config.py`.
+- **Node.js:** v18+ (LTS)
+- **Package Manager:** npm or bun
+- **Docker:** Required for backend services
+- **IDE:** VS Code with TypeScript and Tailwind extensions
+- **Git:** For version control
+- **Environment Management:** dotenv for environment variables
+- **Linting:** ESLint with TypeScript support
+- **Formatting:** Prettier
+- **Testing:** Jest and React Testing Library (planned)
 
-## 8. Audit Service Technical Details
-- **JWT Validation Process:**
-    - Verifies token signature using Supabase JWT secret
-    - Validates claims (expiry, issuer, audience)
-    - Extracts user ID and roles
-    - Caches validation results to reduce repeated verification
+### 2.2 Local Services
 
-- **Share Token Validation:**
-    - Validates share tokens against Supabase database
-    - Checks session-specific permissions
-    - Caches validation results with shorter TTL
-    - Supports read-only access for reviewers
+- **Supabase:** Local development with Supabase CLI
+- **Backend Services:** Dockerized with Docker Compose
+- **Database:** PostgreSQL (via Supabase)
+- **Redis:** For caching (planned)
 
-- **Event Structure:**
-    - Consistent event payload format across frontend and backend
-    - Uses 'type' field (not 'action') for event categorization
-    - Includes sessionId, userId, details, and timestamp
-    - Extends with IP and user agent information when available
+## 3. Code Organization
 
-- **Test Session Support:**
-    - Special "test-" prefix for session IDs to identify test sessions
-    - Bypasses authentication requirements for easier development
-    - Stores events in memory rather than database
-    - Documented pattern for frontend developers
+### 3.1 Frontend Structure
 
-- **Middleware Stack:**
-    - `RequestID`: Generates and tracks unique request IDs
-    - `Logger`: Structured logging with Zap
-    - `ErrorHandler`: Consistent error responses
-    - `Auth`: Authentication and authorization
-    - `Recovery`: Panic recovery
+```
+app/                   # Next.js App Router structure
+  api/                 # API routes
+  auth/                # Authentication pages
+  dashboard/           # Dashboard pages
+  editor/              # Slide editor pages
+  (...)
+components/            # React components
+  dashboard/           # Dashboard-specific components
+  editor/              # Editor-specific components
+    sync-status-indicator.tsx  # Real-time sync status component
+    slide-canvas.tsx           # Slide rendering component
+    comments-panel.tsx         # Comments panel component
+    slide-navigator.tsx        # Slide navigation component
+  ui/                  # shadcn/ui components
+hooks/                 # Custom React hooks
+lib/                   # Utility functions and services
+  api/                 # API client functions
+  services/            # Service integrations
+    realtime-sync.ts   # Supabase real-time sync service
+  store/               # Zustand store
+    index.ts           # Main store creation with persistence
+    types.ts           # Type definitions
+    slices/            # Store slices
+      session-slice.ts
+      slides-slice.ts       # Enhanced with optimistic updates
+      edit-buffers-slice.ts
+      comments-slice.ts
+      notifications-slice.ts
+      merge-slice.ts
+  supabase/            # Supabase client configuration
+public/                # Static assets
+styles/                # Global styles
+types/                 # TypeScript type definitions
+```
 
-- **Error Categorization:**
-    - Domain errors: Internal business logic errors
-    - API errors: Client-facing error responses
-    - Infrastructure errors: Database, network, etc.
+### 3.2 PPTX Processor Service Structure
 
-- **Pagination Implementation:**
-    - Limit/offset pagination for audit logs
-    - Configurable page size limits
-    - Total count for UI pagination controls
+```
+app/
+  api/                 # API endpoints
+    routes/            # Route handlers
+  core/                # Core processing logic
+  models/              # Data models
+  services/            # External service integrations
+job_status/            # Job status tracking
+tests/                 # Test files
+```
 
-- **Security Considerations:**
-    - No sensitive data in logs
-    - Proper JWT validation with expiry checking
-    - Rate limiting (to be implemented)
-    - Non-root Docker container execution
+### 3.3 Audit Service Structure
+
+```
+cmd/
+  server/              # Application entry point
+internal/
+  config/              # Configuration
+  domain/              # Domain models
+  handlers/            # HTTP handlers
+  middleware/          # HTTP middleware
+  repository/          # Data access
+  service/             # Business logic
+pkg/                   # Shared packages
+  cache/               # Caching utilities
+  jwt/                 # JWT handling
+  logger/              # Logging utilities
+tests/                 # Test files
+```
+
+### 3.4 Share Service Structure (IN DEVELOPMENT)
+
+```
+src/
+  controllers/
+  middleware/
+  models/
+  routes/
+  utils/
+  index.ts
+package.json
+tsconfig.json
+Dockerfile
+```
+
+### 3.5 Translation Session Service Structure (NEW)
+
+```
+services/translation-session-service/
+  src/
+    index.ts              # Main Hono app setup
+    routes.ts             # API routes definition
+    controller.ts         # Request handlers/business logic
+    model.ts              # TypeScript interfaces (e.g., TranslationSession)
+    db.ts                 # Supabase client and DB interaction functions
+    middleware.ts         # (Optional) JWT validation, error handling
+  package.json
+  tsconfig.json
+  bun.lock
+  Dockerfile            # (Planned)
+```
+
+## 4. Key Data Structures
+
+### 4.1 Slide Processing Data Model
+
+```typescript
+interface ProcessedSlide {
+  id: string;
+  session_id: string;
+  slide_number: number;
+  svg_url: string;
+  original_width: number;
+  original_height: number;
+  thumbnail_url?: string;
+  created_at: string;
+  updated_at: string;
+  shapes: SlideShape[];
+}
+
+interface SlideShape {
+  id: string;
+  slide_id: string;
+  shape_type: 'text' | 'image' | 'table' | 'chart';
+  content: string;
+  translated_content?: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  is_title: boolean;
+  font_size?: number;
+  font_family?: string;
+  style?: string;
+  created_at: string;
+  updated_at: string;
+}
+```
+
+### 4.2 Translation Session Data Model (`translation_sessions` table - NEW)
+
+```sql
+CREATE TABLE public.translation_sessions (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  user_id uuid NOT NULL,
+  session_name text NOT NULL,
+  original_file_name text NULL,
+  source_language_code character varying(10) NOT NULL,
+  target_language_codes text[] NOT NULL,
+  status text NOT NULL DEFAULT 'draft'::text, -- e.g., draft, in_progress, completed
+  slide_count integer NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  last_opened_at timestamptz NULL,
+  CONSTRAINT translation_sessions_pkey PRIMARY KEY (id),
+  CONSTRAINT translation_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE
+);
+
+-- RLS Policies
+ALTER TABLE public.translation_sessions ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can manage their own translation sessions" ON public.translation_sessions
+  FOR ALL
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Authenticated users can create sessions" ON public.translation_sessions
+  FOR INSERT
+  WITH CHECK (auth.role() = 'authenticated');
+
+-- Auto-update updated_at timestamp
+CREATE TRIGGER handle_updated_at BEFORE UPDATE ON public.translation_sessions
+  FOR EACH ROW EXECUTE PROCEDURE moddatetime (updated_at);
+```
+
+### 4.3 Audit Log Data Model
+
+```typescript
+interface AuditLog {
+  id: string;
+  session_id: string;
+  user_id: string;
+  type: string;
+  data: Record<string, any>;
+  created_at: string;
+}
+```
+
+### 4.4 Zustand Store Model
+
+```typescript
+// Main store structure
+interface AppStore extends 
+  SessionState, 
+  SlidesState, 
+  EditBuffersState, 
+  CommentsState, 
+  NotificationsState,
+  MergeState {}
+
+// Session slice
+interface SessionState {
+  currentSession: Session | null;
+  userRole: UserRole;
+  shareToken: string | null;
+  setCurrentSession: (session: Session | null) => void;
+  setUserRole: (role: UserRole) => void;
+  setShareToken: (token: string | null) => void;
+}
+
+// Slides slice with sync capabilities
+interface SlidesState {
+  slides: ProcessedSlide[];
+  currentSlideIndex: number;
+  isLoading: boolean;
+  syncStatus: SyncStatus; // Added for real-time sync
+  reorderState: SlideReorderState | null;
+  setSlides: (slides: ProcessedSlide[]) => void;
+  setCurrentSlideIndex: (index: number) => void;
+  updateSlide: (slideId: string, data: Partial<ProcessedSlide>) => void;
+  updateShape: (slideId: string, shapeId: string, data: Partial<SlideShape>) => Promise<void>; // Async for server sync
+  setSyncStatus: (status: Partial<SyncStatus>) => void; // Manage sync state
+  syncSlidesOrder: (slides: ProcessedSlide[]) => Promise<void>; // Sync slide order with server
+  startReorder: (sourceIndex: number) => void;
+  moveSlide: (targetIndex: number) => void;
+  finishReorder: () => void;
+}
+
+// Sync status interface
+interface SyncStatus {
+  isSyncing: boolean;
+  lastSynced: string | null;
+  error: string | null;
+}
+
+// Edit buffers slice
+interface EditBuffersState {
+  editBuffers: Record<string, EditBuffer>;
+  createEditBuffer: (shapeId: string, initialText: string) => void;
+  updateEditBuffer: (shapeId: string, text: string) => void;
+  saveEditBuffer: (shapeId: string) => void;
+  discardEditBuffer: (shapeId: string) => void;
+  hasUnsavedChanges: (shapeId: string) => boolean;
+}
+
+// Comments slice
+interface CommentsState {
+  comments: Record<string, Comment[]>;
+  isLoadingComments: Record<string, boolean>;
+  loadComments: (shapeId: string) => void;
+  addComment: (shapeId: string, content: string) => void;
+  updateComment: (shapeId: string, commentId: string, content: string) => void;
+  deleteComment: (shapeId: string, commentId: string) => void;
+}
+
+// Notifications slice
+interface NotificationsState {
+  notifications: CommentNotification[];
+  unreadCount: number;
+  addNotification: (notification: CommentNotification) => void;
+  markAsRead: (notificationId: string) => void;
+  markAllAsRead: () => void;
+  clearNotifications: () => void;
+}
+
+// Merge slice
+interface MergeState {
+  selectedShapes: MergeSelection[];
+  targetSlideId: string | null;
+  selectShape: (slideId: string, shapeId: string) => void;
+  deselectShape: (slideId: string, shapeId: string) => void;
+  setTargetSlide: (slideId: string) => void;
+  clearSelection: () => void;
+  mergeSelected: () => void;
+}
+```
+
+## 5. API Endpoints
+
+### 5.1 Next.js API Routes
+
+- `/api/sessions` - Session management
+- `/api/slides` - Slide management
+- `/api/process-pptx` - PPTX upload and processing
+- `/api/export` - Export translated presentation
+- `/api/share` - Share session with others
+- `/api/audit` - Fetch audit logs
+
+### 5.2 PPTX Processor Service API
+
+- `/v1/process` - Process PPTX file
+- `/v1/status/:job_id` - Get job status
+- `/v1/retry/:job_id` - Retry failed job
+- `/v1/health` - Health check endpoint
+
+### 5.3 Audit Service API
+
+- `/api/v1/audit/:session_id` - Get audit logs for session
+- `/api/v1/health` - Health check endpoint
+
+## 6. Authentication Flow
+
+1. User signs in with email/password or social provider via Supabase Auth
+2. Supabase returns JWT token and refresh token
+3. JWT token is stored in browser (cookie or localStorage)
+4. Token is used for API requests to Supabase and backend services
+5. For shared sessions, a share token is generated and used for limited access
+
+## 7. Technical Constraints
+
+### 7.1 Frontend Constraints
+
+- **Browser Support:** Modern browsers only (Chrome, Firefox, Safari, Edge)
+- **Mobile Support:** Responsive design but limited editing functionality on small screens
+- **Performance:** Large presentations may require pagination or virtualization
+- **Offline Support:** Limited offline capabilities with local storage
+
+### 7.2 Backend Constraints
+
+- **PPTX Processing:** LibreOffice availability for high-quality SVG generation
+- **Deployment:** Docker support required for services
+- **Scalability:** Stateless design for horizontal scaling
+- **Storage:** File size limits for presentations (50MB initial limit)
+
+### 7.3 Supabase Constraints
+
+- **Database:** PostgreSQL limitations and row-level security constraints
+- **Storage:** File size and bandwidth limits based on plan
+- **Authentication:** Limited to supported providers
+- **Edge Functions:** Cold start latency
+
+## 8. Performance Considerations
+
+### 8.1 Frontend Performance
+
+- **Lazy Loading:** Components and resources loaded on demand
+- **Image Optimization:** Next.js Image component for optimized delivery
+- **State Management:** 
+  - Selective re-rendering with Zustand selectors
+  - Optimistic updates for faster perceived performance
+  - Persistent state to reduce initialization time
+  - Partialize function to limit storage size
+- **Code Splitting:** Next.js automatic code splitting
+- **Server Components:** Reduced client-side JavaScript
+- **Real-time Sync:** Efficient subscription management with cleanup
+- **LocalStorage Optimization:** Storing only necessary state
+
+### 8.2 Backend Performance
+
+- **Caching:** JWT validation cache in Audit Service
+- **Background Processing:** Asynchronous PPTX processing
+- **Database Optimization:** Proper indexing and query optimization
+- **File Handling:** Stream processing for large files
+
+## 9. Testing Strategy
+
+### 9.1 Frontend Testing
+
+- **Unit Tests:** Jest for utility functions and hooks
+- **Component Tests:** React Testing Library for components
+- **Integration Tests:** Testing component interactions
+- **E2E Tests:** Cypress for critical user journeys
+
+### 9.2 Backend Testing
+
+- **Unit Tests:** Service and repository layer testing
+- **Integration Tests:** API endpoint testing with test database
+- **Mock Tests:** External service mocking
+
+## 10. Deployment Strategy
+
+### 10.1 Frontend Deployment
+
+- **Development:** Local Next.js development server
+- **Production:** Vercel or similar platform with CI/CD integration
+
+### 10.2 Backend Deployment
+
+- **Development:** Docker Compose for local services
+- **Production:** Cloud Run or similar container platform
+- **Database:** Managed PostgreSQL via Supabase
+
+### 10.3 Environment Management
+
+- **Environment Variables:** Managed per environment
+- **Secrets:** Secure storage in platform services
+- **Configuration:** Environment-specific settings
+
+## 11. Monitoring and Logging
+
+### 11.1 Frontend Monitoring
+
+- **Error Tracking:** Sentry or similar service
+- **Analytics:** Google Analytics or similar
+- **Performance Monitoring:** Web Vitals tracking
+
+### 11.2 Backend Monitoring
+
+- **Logging:** Structured logging with correlation IDs
+- **Metrics:** Prometheus or similar for service metrics
+- **Alerting:** Based on error rates and performance thresholds
+
+## 12. Security Considerations
+
+### 12.1 Authentication and Authorization
+
+- **JWT Validation:** Proper verification with expiration checking
+- **Role-Based Access:** Enforced at API and database levels
+- **Share Token Security:** Limited-scope access with expiration
+
+### 12.2 Data Security
+
+- **Database Security:** Row-level security policies
+- **API Security:** Input validation and sanitization
+- **File Security:** Secure upload handling and storage

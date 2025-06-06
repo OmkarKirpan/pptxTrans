@@ -1,0 +1,43 @@
+# Core dependencies
+fastapi>=0.103.1
+uvicorn>=0.23.2
+python-multipart>=0.0.6
+pydantic>=2.4.2
+pydantic-settings>=2.0.3
+requests>=2.32.3
+
+# PPTX processing
+python-pptx>=0.6.21
+pillow>=10.0.0
+
+# Supabase integration
+supabase>=1.0.3
+storage3>=0.5.4
+
+# Utils
+python-dotenv>=1.0.0
+aiofiles>=23.2.1
+psutil
+
+# Testing
+pytest>=7.4.2
+httpx>=0.25.0
+
+# For structured logging
+python-json-logger
+
+# For fuzzy string matching in slide parser
+fuzzywuzzy
+python-Levenshtein
+
+# For LibreOffice UNO Bridge (installed with LibreOffice)
+# uno
+
+# Linter/Formatter
+ruff
+
+# New dependencies
+defusedxml==0.7.1
+aiohttp==3.9.5
+loguru==0.7.2
+lxml==5.2.2 

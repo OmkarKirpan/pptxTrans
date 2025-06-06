@@ -1,0 +1,157 @@
+services:
+  # Frontend Next.js application
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pptxtransed-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL}
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+      - NEXT_PUBLIC_AUDIT_SERVICE_URL=http://audit-service:4006
+      - NEXT_PUBLIC_PPTX_PROCESSOR_URL=http://pptx-processor:8000
+      - NEXT_PUBLIC_SHARE_SERVICE_URL=http://share-service:3001
+      - NEXT_PUBLIC_TRANSLATION_SESSION_SERVICE_URL=http://translation-session-service:3002
+    depends_on:
+      audit-service:
+        condition: service_healthy
+      pptx-processor:
+        condition: service_healthy
+      share-service:
+        condition: service_started
+      translation-session-service:
+        condition: service_started
+    networks:
+      - pptxtransed-network
+    restart: unless-stopped
+
+  # Audit Service (Go)
+  audit-service:
+    build:
+      context: ./services/audit-service
+      dockerfile: Dockerfile
+    container_name: pptxtransed-audit-service
+    ports:
+      - "4006:4006"
+    environment:
+      - PORT=4006
+      - LOG_LEVEL=debug
+      - JWT_SECRET=${JWT_SECRET:-local-development-secret-key}
+      - CORS_ORIGIN=http://localhost:3000
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET}
+      - HTTP_TIMEOUT=30s
+      - HTTP_MAX_IDLE_CONNS=100
+      - HTTP_MAX_CONNS_PER_HOST=10
+      - HTTP_IDLE_CONN_TIMEOUT=90s
+      - CACHE_JWT_TTL=5m
+      - CACHE_SHARE_TOKEN_TTL=1m
+      - CACHE_CLEANUP_INTERVAL=10m
+      - MAX_PAGE_SIZE=100
+      - DEFAULT_PAGE_SIZE=50
+    networks:
+      - pptxtransed-network
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:4006/health",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # PPTX Processor Service (Python)
+  pptx-processor:
+    build:
+      context: ./services/pptx-processor
+      dockerfile: Dockerfile
+    container_name: pptxtransed-pptx-processor
+    ports:
+      - "8000:8000"
+    environment:
+      # API Configuration
+      - API_ENV=${NODE_ENV:-development}
+      - API_PORT=8000
+      - API_HOST=0.0.0.0
+      - LOG_LEVEL=debug
+      # LibreOffice Configuration
+      - LIBREOFFICE_PATH=/usr/bin/soffice
+      # Processing Configuration
+      - TEMP_UPLOAD_DIR=/tmp/uploads
+      - TEMP_PROCESSING_DIR=/tmp/processing
+      # Supabase Configuration
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_KEY=${SUPABASE_ANON_KEY}
+      # CORS Configuration
+      - CORS_ORIGIN=http://localhost:3000
+    volumes:
+      - pptx_uploads:/tmp/uploads
+      - pptx_processing:/tmp/processing
+    networks:
+      - pptxtransed-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Share Service (Bun)
+  share-service:
+    build:
+      context: ./services/share-service
+      dockerfile: Dockerfile
+    container_name: pptxtransed-share-service
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - NODE_ENV=development
+      - CORS_ORIGIN=http://localhost:3000
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_KEY=${SUPABASE_ANON_KEY}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - SHARE_TOKEN_SECRET=${JWT_SECRET:-local-development-secret-key}
+    networks:
+      - pptxtransed-network
+    restart: unless-stopped
+
+  # Translation Session Service (Bun)
+  translation-session-service:
+    build:
+      context: ./services/translation-session-service
+      dockerfile: Dockerfile
+    container_name: pptxtransed-translation-session-service
+    ports:
+      - "3002:3002"
+    environment:
+      - PORT=3002
+      - NODE_ENV=development
+      - FRONTEND_URL=http://localhost:3000
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+    networks:
+      - pptxtransed-network
+    restart: unless-stopped
+
+networks:
+  pptxtransed-network:
+    driver: bridge
+
+volumes:
+  pptx_uploads:
+    name: pptxtransed_pptx_uploads
+  pptx_processing:
+    name: pptxtransed_pptx_processing 

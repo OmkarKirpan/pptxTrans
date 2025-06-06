@@ -1,20 +1,16 @@
-export type SessionStatus = "draft" | "in-progress" | "ready"
+// Types index file
+// Export all types from their respective modules
 
-export interface TranslationSession {
-  id: string
-  user_id: string
-  name: string
-  created_at: string
-  updated_at: string
-  status: SessionStatus
-  progress: number
-  slide_count: number
-  source_language?: string | null
-  target_language?: string | null
-  thumbnail_url: string | null
-  original_file_path: string | null
-  translated_file_path?: string | null
-}
+export * from './database/schema'
+export * from './api/requests'
+export * from './store/session'
+
+// Re-export commonly used types
+export type { Database } from './database/schema'
+export type { UploadPresentationRequest, UpdatePresentationRequest } from './api/requests'
+export type { User, SessionState, SessionActions } from './store/session'
+
+export type SessionStatus = "draft" | "in-progress" | "ready"
 
 export interface SlideShape {
   id: string
@@ -40,6 +36,17 @@ export interface SlideShape {
   has_comments: boolean
   created_at: string
   updated_at: string
+  // Auto-translation properties
+  is_auto_translated?: boolean // Flag indicating if the text was automatically translated
+  translated_metadata?: {
+    is_auto_translated?: boolean,
+    translation_source?: string,
+    confidence_score?: number,
+    translation_date?: string
+  } // Additional metadata about the translation
+  // UI state flags - not persisted to database
+  _pendingUpdate?: boolean // Flag for optimistic updates
+  _localChanges?: boolean // Flag for changes made locally but not yet synchronized
 }
 
 export interface ProcessedSlide {
@@ -52,6 +59,8 @@ export interface ProcessedSlide {
   created_at: string
   updated_at: string
   shapes: SlideShape[]
+  // UI state flags - not persisted to database
+  _pendingSync?: boolean // Flag indicating slide is being synced
 }
 
 export interface UploadedFile {
@@ -59,4 +68,25 @@ export interface UploadedFile {
   previewUrl?: string
   progress: number
   error?: string
+  storagePath?: string // Path in Supabase storage
+  publicUrl?: string // Public URL for the file
+}
+
+// Export share types
+export interface ShareRecord {
+  id: string;
+  session_id: string;
+  share_token: string;
+  role: 'viewer' | 'commenter' | 'reviewer';
+  permissions: SharePermissions;
+  email?: string;
+  expires_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SharePermissions {
+  read: boolean;
+  comment: boolean;
+  edit: boolean;
 }

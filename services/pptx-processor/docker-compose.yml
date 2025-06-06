@@ -1,0 +1,49 @@
+services:
+  pptx-processor:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      # LibreOffice Configuration
+      - LIBREOFFICE_PATH=/usr/bin/soffice
+      
+      # Processing Configuration
+      - TEMP_UPLOAD_DIR=/tmp/uploads
+      - TEMP_PROCESSING_DIR=/tmp/processing
+      - LOG_LEVEL=INFO
+      
+      # Supabase Configuration (update with your values)
+      - SUPABASE_URL=${SUPABASE_URL:-http://localhost:54321}
+      - SUPABASE_KEY=${SUPABASE_KEY:-your-supabase-anon-key}
+      
+      # API Configuration
+      - API_ENV=development
+      - API_PORT=8000
+      - API_HOST=0.0.0.0
+      
+    volumes:
+      # Mount temporary directories for processing
+      - ./tmp/uploads:/tmp/uploads
+      - ./tmp/processing:/tmp/processing
+      # Mount source code for development (optional)
+      - .:/app
+      
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+      
+    restart: unless-stopped
+    
+    # Ensure directories exist
+    command: >
+      sh -c "
+        mkdir -p /tmp/uploads /tmp/processing &&
+        uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      "
+
+networks:
+  default:
+    name: pptx-processor-network 

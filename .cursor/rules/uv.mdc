@@ -1,0 +1,324 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Cursor Rules - UV Python Package Manager
+
+## Core Philosophy
+- Use `uv` as the primary Python package manager for all Python projects
+- Prefer `uv sync` over `uv pip install` when working with projects that have `pyproject.toml`
+- Always use lockfiles (`uv.lock`) for reproducible environments
+- Leverage caching for faster builds and installations
+
+## Package Manager Commands
+- Use `uv add <package>` instead of `pip install <package>`
+- Use `uv remove <package>` instead of `pip uninstall <package>`
+- Use `uv sync` instead of `pip install -r requirements.txt` for projects
+- Use `uv run <command>` instead of activating virtual environments manually
+- Use `uv tool install <tool>` for global CLI tools
+
+## Project Management
+- Always create projects with `uv init` or convert existing projects to use `pyproject.toml`
+- Use `uv sync --locked` for production deployments
+- Use `uv sync --dev` for development environments
+- Generate lockfiles with `uv lock` and commit them to version control
+- Use `uv export --format requirements-txt` to generate requirements.txt when needed
+
+## Virtual Environment Management
+- Let uv manage virtual environments automatically with `uv run`
+- For explicit virtual environments: `uv venv` and `uv venv --python 3.12`
+- Use `UV_PROJECT_ENVIRONMENT` to override the default virtual environment location
+- Add `.venv/` to `.gitignore` and `.dockerignore`
+
+## Docker Integration Best Practices
+
+### Multi-stage Docker Build Pattern
+```dockerfile
+# Builder stage
+FROM python:3.12-slim AS builder
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# Set environment variables for optimal Docker builds
+ENV UV_COMPILE_BYTECODE=1
+ENV UV_LINK_MODE=copy
+
+# Change the working directory to the app directory
+WORKDIR /app
+
+# Install dependencies (without project)
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv sync --locked --no-install-project --no-editable
+
+# Copy the project into the image
+COPY . /app
+
+# Sync the project
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-editable
+
+# Runtime stage
+FROM python:3.12-slim
+
+# Copy the environment, but not the source code
+COPY --from=builder --chown=app:app /app/.venv /app/.venv
+
+# Make sure to use the virtual environment
+ENV VIRTUAL_ENV=/app/.venv
+ENV PATH="/app/.venv/bin:$PATH"
+
+# Run the application
+CMD ["/app/.venv/bin/python", "-m", "app"]
+```
+
+### Alternative: System Python Installation
+```dockerfile
+FROM python:3.12-slim
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# Set environment for system Python
+ENV UV_SYSTEM_PYTHON=1
+
+# Install dependencies
+COPY requirements.txt .
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --no-cache -r requirements.txt
+```
+
+### Requirements.txt Projects
+```dockerfile
+FROM python:3.12-slim
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# Create and use virtual environment
+RUN uv venv /opt/venv
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install dependencies
+COPY requirements.txt .
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install -r requirements.txt
+```
+
+## Environment Variables for Optimization
+
+### Production Builds
+```dockerfile
+ENV UV_COMPILE_BYTECODE=1          # Compile bytecode for faster startup
+ENV UV_LINK_MODE=copy              # Use copy mode for Docker compatibility
+```
+
+### Caching Control
+```dockerfile
+ENV UV_CACHE_DIR=/opt/uv-cache/    # Set cache location
+ENV UV_NO_CACHE=1                  # Disable cache if not mounting
+```
+
+### System Integration
+```dockerfile
+ENV UV_SYSTEM_PYTHON=1             # Use system Python instead of virtual env
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv # Override project environment location
+```
+
+## Common Patterns
+
+### Development Workflow
+```bash
+# Initialize new project
+uv init my-project
+cd my-project
+
+# Add dependencies
+uv add fastapi uvicorn
+uv add --dev pytest ruff black
+
+# Run application
+uv run python -m app
+
+# Run tests
+uv run pytest
+
+# Format code
+uv run ruff format .
+uv run ruff check --fix .
+```
+
+### Legacy Project Migration
+```bash
+# Convert requirements.txt to pyproject.toml
+uv add --requirements requirements.txt
+
+# Generate lockfile
+uv lock
+
+# Sync environment
+uv sync
+```
+
+### CI/CD Pipeline
+```bash
+# Install exact versions from lockfile
+uv sync --locked
+
+# Run in isolated environment
+uv run pytest
+uv run ruff check .
+```
+
+## Troubleshooting
+
+### Build Failures
+- Use `uv pip install --no-build-isolation-package <package>` for packages with missing build deps
+- Add build dependencies: `uv add --dev build setuptools wheel`
+- For platform-specific issues, check available wheels on PyPI
+
+### Docker Issues
+- Always use cache mounts: `--mount=type=cache,target=/root/.cache/uv`
+- Set `UV_LINK_MODE=copy` to avoid hard link issues across filesystems
+- Add build dependencies in builder stage for packages requiring compilation
+
+### Environment Issues
+- Use `uv python list` to see available Python versions
+- Use `uv python install 3.12` to install specific Python versions
+- Check environment with `uv run python --version`
+
+## File Structure Best Practices
+```
+project/
+├── pyproject.toml          # Project configuration and dependencies
+├── uv.lock                 # Lockfile (commit to version control)
+├── .python-version         # Pin Python version
+├── .gitignore              # Include .venv/
+├── .dockerignore           # Include .venv/
+└── src/
+    └── package/
+```
+
+## Integration with Other Tools
+
+### Pre-commit
+```yaml
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --fix
+        language: system
+        types: [python]
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format
+        language: system
+        types: [python]
+```
+
+### GitHub Actions
+```yaml
+- name: Set up uv
+  uses: astral-sh/setup-uv@v3
+  with:
+    enable-cache: true
+
+- name: Install dependencies
+  run: uv sync --locked
+
+- name: Run tests
+  run: uv run pytest
+```
+
+## Command Translations
+
+### From pip to uv
+```bash
+pip install package          → uv add package
+pip install -r requirements.txt → uv sync (with pyproject.toml) or uv pip install -r requirements.txt
+pip install -e .             → uv sync or uv install --editable .
+pip freeze                   → uv export --format requirements-txt
+pip list                     → uv tree
+python -m venv .venv         → uv venv
+source .venv/bin/activate    → uv run (no activation needed)
+```
+
+### From poetry/pipenv to uv
+```bash
+poetry install               → uv sync
+poetry add package           → uv add package
+poetry run command           → uv run command
+pipenv install               → uv sync
+pipenv install package       → uv add package
+pipenv run command           → uv run command
+```
+
+## Performance Tips
+- Use `--locked` flag in production for faster installs
+- Mount cache directories in Docker builds
+- Use `--no-editable` for production containers
+- Enable bytecode compilation with `UV_COMPILE_BYTECODE=1`
+- Use intermediate Docker layers to cache dependencies separately from code
+
+## Project-Specific Rules for PowerPoint Translator
+
+### Service-Specific Docker Patterns
+For Python services (pptx-processor, audit-service), prefer the virtual environment approach:
+
+```dockerfile
+FROM python:3.12-slim AS builder
+
+# Install build dependencies for packages that might need compilation
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    python3-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# Set UV environment variables for optimal Docker builds
+ENV UV_COMPILE_BYTECODE=1
+ENV UV_LINK_MODE=copy
+
+# Create virtual environment
+RUN uv venv /opt/venv
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+WORKDIR /build
+COPY requirements.txt .
+
+# Install dependencies using uv with cache mounting
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install -r requirements.txt
+
+FROM python:3.12-slim
+
+# Install runtime dependencies (LibreOffice, etc.)
+RUN apt-get update && apt-get install -y \
+    libreoffice \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy the virtual environment from builder stage
+COPY --from=builder /opt/venv /opt/venv
+
+# Set environment to use the virtual environment
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Continue with application setup...
+```
+
+### Development Commands
+- Use `uv run uvicorn app.main:app --reload` for FastAPI development
+- Use `uv run pytest` for testing Python services
+- Use `uv add --dev` for development dependencies like ruff, pytest
