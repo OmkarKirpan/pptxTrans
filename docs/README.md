@@ -57,6 +57,7 @@ docs/
 │   ├── overview.md             # ⚠️ High-level architecture (needs verification)
 │   ├── frontend.md             # ✅ Next.js integration
 │   ├── pptx-processor.md       # ✅ File processing service
+│   ├── audit-service-integration.md # ❌ Critical fixes needed
 │   ├── share-service-integration.md # ⚠️ Sharing features (needs verification)
 │   └── translation-session.md  # ⚠️ Translation services (needs verification)
 ├── testing/                     # Testing & Development
