@@ -17,11 +17,11 @@ import (
 
 // Test constants
 const (
-	testSessionID   = "test-session-123"
-	testUserID      = "test-user-456"
-	testOwnerID     = "test-owner-789"
+	testSessionID   = "session-123"
+	testUserID      = "user-456"
+	testOwnerID     = "owner-789"
 	testOtherUserID = "other-user-999"
-	testShareToken  = "test-share-token-abc"
+	testShareToken  = "share-token-abc"
 )
 
 // Helper functions to create test data
