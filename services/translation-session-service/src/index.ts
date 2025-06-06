@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { loggerMiddleware } from '@/middleware/logger';
+import { loggerMiddleware } from './middleware/logger';
 import sessionRoutes from '@/routes';
 
 const app = new Hono();
