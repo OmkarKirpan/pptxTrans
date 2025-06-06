@@ -34,4 +34,10 @@ python-Levenshtein
 # uno
 
 # Linter/Formatter
-ruff 
+ruff
+
+# New dependencies
+defusedxml==0.7.1
+aiohttp==3.9.5
+loguru==0.7.2
+lxml==5.2.2 

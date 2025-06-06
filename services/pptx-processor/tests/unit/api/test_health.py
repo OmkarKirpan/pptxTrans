@@ -10,7 +10,7 @@ def test_health_endpoint_success(test_client, mock_supabase_service):
             patch("psutil.virtual_memory", return_value=MagicMock(percent=50.0)), \
             patch("psutil.disk_usage", return_value=MagicMock(percent=30.0)):
 
-        response = test_client.get("/health/health")
+        response = test_client.get("/v1/health")
 
         assert response.status_code == 200
         data = response.json()
@@ -35,7 +35,7 @@ def test_health_endpoint_supabase_failure(test_client):
             patch("psutil.disk_usage", return_value=MagicMock(percent=30.0)), \
             patch("app.services.supabase_service.check_supabase_connection", return_value=False):
 
-        response = test_client.get("/health/health")
+        response = test_client.get("/v1/health")
 
         assert response.status_code == 500
         data = response.json()
@@ -53,7 +53,7 @@ def test_health_endpoint_storage_failure(test_client, mock_supabase_service):
             patch("psutil.disk_usage", return_value=MagicMock(percent=30.0)), \
             patch("os.access", return_value=False):
 
-        response = test_client.get("/health/health")
+        response = test_client.get("/v1/health")
 
         assert response.status_code == 500
         data = response.json()

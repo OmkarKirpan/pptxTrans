@@ -5,25 +5,20 @@
 ### Core Framework
 - **FastAPI**: Modern, high-performance Python web framework for the API layer.
 
-### Modular Architecture (Refactored)
-The service is now organized into three focused modules:
+### Service Architecture (Updated)
+The service is organized into a set of single-responsibility modules:
 
-#### 1. **Main Orchestrator (`pptx_processor.py`)**
-- **Purpose**: High-level workflow coordination and job management
-- **Dependencies**: Imports and coordinates between all other modules
-- **Features**: Cache management, status tracking, error coordination
+- **Main Orchestrator (`pptx_processor.py`)**: Coordinates the high-level processing workflow.
+- **SVG Generation Module (`svg_generator.py`)**: Dedicated to creating SVGs via LibreOffice (UNO API + Batch).
+- **Slide Parser Module (`slide_parser.py`)**: Handles all text/shape extraction and validation using `python-pptx`.
+- **Processing Manager & Worker Pool (`processing_manager.py`, `worker_pool.py`)**: Manages a background job queue and ensures concurrent processing limits are respected.
+- **Caching (`cache_service.py`)**: Implements a file-based cache to avoid reprocessing identical files.
+- **Status Management (`job_status.py`, `supabase_service.py`)**: A dual-channel system for tracking real-time progress locally and persistent final status in Supabase.
+- **Results Retrieval (`results_service.py`)**: Fetches final results, either from a cached JSON file in storage or by reconstructing them from the database.
+- **Supabase Client (`supabase_service.py`)**: Isolates all Supabase DB and Storage interactions.
 
-#### 2. **SVG Generation Module (`svg_generator.py`)**
-- **LibreOffice UNO API**: Primary method using UNO bridge to unoserver for individual slide processing
-- **LibreOffice Batch**: Fallback method using subprocess for batch conversion with `--convert-to svg:"impress_svg_Export"`
-- **Async Retry**: Exponential backoff retry mechanism for UNO API connections
-- **Validation**: LibreOffice availability checking and configuration validation
-
-#### 3. **Slide Parser Module (`slide_parser.py`)**
-- **`python-pptx`**: For parsing PPTX files, extracting slide content, shapes, text, styles, and metadata
-- **Table Processing**: Cell-by-cell extraction for granular translation support
-- **Coordinate Validation**: SVG text matching with fuzzy logic for accuracy verification
-- **Pillow (PIL)**: For thumbnail generation and image processing
+### Core Dependencies
+- **`python-pptx`**: For parsing PPTX files, extracting slide content, shapes, text, styles, and metadata.
 
 ### Enhanced Dependencies
 - **`fuzzywuzzy`**: For advanced text matching and coordinate validation

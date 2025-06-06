@@ -60,14 +60,20 @@ def extract_shapes_enhanced(slide, slide_width_emu: int, slide_height_emu: int) 
                     if cell.text and cell.text.strip():
                         text = cell.text
                         shapes_data.append(SlideShape(
-                            id=str(uuid.uuid4()), shape_type=ShapeType.TABLE_CELL, text=text,
-                            x=running_left, y=running_top, width=col_widths[c], height=row_heights[r],
-                            unit=CoordinateUnit.EMU,
-                            metadata={
-                                "is_title": False, "is_subtitle": False, "placeholder_type": "TABLE_CELL",
-                                "text_length": len(text), "word_count": len(text.split()),
-                                "translation_priority": 5, "table_row": r, "table_col": c,
-                            },
+                            shape_id=str(uuid.uuid4()), 
+                            shape_type=ShapeType.TABLE_CELL, 
+                            original_text=text,
+                            x_coordinate=running_left, 
+                            y_coordinate=running_top, 
+                            width=col_widths[c], 
+                            height=row_heights[r],
+                            coordinates_unit=CoordinateUnit.EMU,
+                            is_title=False, 
+                            is_subtitle=False, 
+                            placeholder_type="TABLE_CELL",
+                            text_length=len(text), 
+                            word_count=len(text.split()),
+                            translation_priority=5,
                             validation_status="unvalidated",
                             validation_details="Coordinates have not been validated against SVG output."
                         ))
@@ -80,22 +86,25 @@ def extract_shapes_enhanced(slide, slide_width_emu: int, slide_height_emu: int) 
 
         text_frame = shape.text_frame
         text = text_frame.text
-        is_title = shape.has_placeholder and (shape.placeholder_format.type in [1, 101])
-        is_subtitle = shape.has_placeholder and shape.placeholder_format.type == 2
+        is_title = shape.is_placeholder and (shape.placeholder_format.type in [1, 101])
+        is_subtitle = shape.is_placeholder and shape.placeholder_format.type == 2
         
         shapes_data.append(SlideShape(
-            id=str(uuid.uuid4()), shape_type=ShapeType.TEXT_BOX, text=text,
-            x=shape.left if shape.left else 0, y=shape.top if shape.top else 0,
-            width=shape.width if shape.width else 0, height=shape.height if shape.height else 0,
-            unit=CoordinateUnit.EMU,
-            metadata={
-                "is_title": is_title, "is_subtitle": is_subtitle,
-                "placeholder_type": shape.placeholder_format.type.name if shape.has_placeholder else "NONE",
-                "text_length": len(text), "word_count": len(text.split()),
-                "translation_priority": 10 if is_title else (8 if is_subtitle else 5),
-            },
-            validation_status="unvalidated",
-            validation_details="Coordinates not validated"
+            shape_id=str(uuid.uuid4()), 
+            shape_type=ShapeType.TEXT, 
+            original_text=text,
+            x_coordinate=shape.left if shape.left else 0, 
+            y_coordinate=shape.top if shape.top else 0,
+            width=shape.width if shape.width else 0, 
+            height=shape.height if shape.height else 0,
+            coordinates_unit=CoordinateUnit.EMU,
+            is_title=is_title, 
+            is_subtitle=is_subtitle,
+            placeholder_type=shape.placeholder_format.type.name if shape.is_placeholder else "NONE",
+            text_length=len(text), 
+            word_count=len(text.split()),
+            translation_priority=10 if is_title else (8 if is_subtitle else 5),
+            validation_status="unvalidated"
         ))
     return shapes_data
 
@@ -107,8 +116,8 @@ def create_thumbnail_from_slide_enhanced(slide, shapes_data: List[SlideShape], f
     draw = ImageDraw.Draw(img)
     scale_x, scale_y = thumbnail_width_px / slide_width_emu, thumbnail_height_px / slide_height_emu
     for shape in shapes_data:
-        x1, y1 = int(shape.x * scale_x), int(shape.y * scale_y)
-        x2, y2 = int((shape.x + shape.width) * scale_x), int((shape.y + shape.height) * scale_y)
+        x1, y1 = int(shape.x_coordinate * scale_x), int(shape.y_coordinate * scale_y)
+        x2, y2 = int((shape.x_coordinate + shape.width) * scale_x), int((shape.y_coordinate + shape.height) * scale_y)
         draw.rectangle([x1, y1, x2, y2], outline="lightgrey", fill="#F0F0F0")
     img.save(file_path, 'PNG')
 
@@ -222,19 +231,19 @@ def _extract_svg_text_elements(root, namespaces) -> List[Dict[str, Any]]:
                 text_content = text_elem.text or ''
                 if text_content.strip():
                     # tspan might inherit position from parent text element
-                    parent = text_elem.getparent()
-                    if parent is not None:
-                        x = float(text_elem.get('x') or parent.get('x', 0))
-                        y = float(text_elem.get('y') or parent.get('y', 0))
-                        
-                        text_elements.append({
-                            'text': text_content.strip(),
-                            'x': x,
-                            'y': y,
-                            'font_size': text_elem.get('font-size', ''),
-                            'font_family': text_elem.get('font-family', ''),
-                            'element': text_elem
-                        })
+                    # Since ElementTree doesn't have getparent(), we'll use the element's own coordinates
+                    # or default to 0 if not available
+                    x = float(text_elem.get('x', 0))
+                    y = float(text_elem.get('y', 0))
+                    
+                    text_elements.append({
+                        'text': text_content.strip(),
+                        'x': x,
+                        'y': y,
+                        'font_size': text_elem.get('font-size', ''),
+                        'font_family': text_elem.get('font-family', ''),
+                        'element': text_elem
+                    })
     
     except Exception as e:
         logger.warning(f"Error extracting SVG text elements: {e}")
@@ -313,8 +322,8 @@ def _apply_coordinate_validation(shape: SlideShape, match_result, transform_info
         
         # Compare with actual shape coordinates (convert EMU to pixels for comparison)
         EMU_PER_PIXEL = 12700  # Approximate EMU to pixel conversion
-        shape_x_px = shape.x / EMU_PER_PIXEL
-        shape_y_px = shape.y / EMU_PER_PIXEL
+        shape_x_px = shape.x_coordinate / EMU_PER_PIXEL
+        shape_y_px = shape.y_coordinate / EMU_PER_PIXEL
         
         # Calculate coordinate differences
         diff_x = abs(expected_x - shape_x_px)
@@ -333,15 +342,12 @@ def _apply_coordinate_validation(shape: SlideShape, match_result, transform_info
             shape.validation_details = f"Low confidence match (match: {match_score}%, diff: ±{diff_x:.1f},±{diff_y:.1f}px)"
         
         # Store additional validation metadata
-        if not shape.metadata:
-            shape.metadata = {}
-        
-        shape.metadata.update({
-            'svg_match_score': match_score,
-            'svg_coordinates': {'x': svg_x, 'y': svg_y},
-            'coordinate_difference': {'x': diff_x, 'y': diff_y},
-            'svg_text_matched': svg_element['text']
-        })
+        # Note: metadata field doesn't exist in SlideShape model, so we skip this for now
+        # This could be added to the model later if needed
+        logger.debug(f"Validation metadata: svg_match_score={match_score}, "
+                    f"svg_coordinates=({svg_x}, {svg_y}), "
+                    f"coordinate_difference=({diff_x}, {diff_y}), "
+                    f"svg_text_matched='{svg_element['text']}')")
         
     except Exception as e:
         logger.warning(f"Error applying coordinate validation: {e}")

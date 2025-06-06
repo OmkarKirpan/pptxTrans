@@ -1,6 +1,6 @@
 from enum import Enum
 from typing import List, Optional, Dict, Any, Union
-from pydantic import BaseModel, Field, AnyUrl, validator
+from pydantic import BaseModel, Field, AnyUrl, field_validator
 from datetime import datetime
 import uuid
 
@@ -18,6 +18,7 @@ class CoordinateUnit(str, Enum):
     """Unit for shape coordinates."""
     PERCENTAGE = "percentage"
     PIXELS = "px"
+    EMU = "emu"
 
 
 class ProcessingStatus(str, Enum):
@@ -52,7 +53,7 @@ class SlideShape(BaseModel):
     y_coordinate: float = Field(..., description="Y coordinate of the shape")
     width: float = Field(..., description="Width of the shape")
     height: float = Field(..., description="Height of the shape")
-    coordinates_unit: CoordinateUnit = Field(...,
+    coordinates_unit: CoordinateUnit = Field(CoordinateUnit.EMU,
                                              description="Unit of the coordinates")
     font_size: Optional[float] = Field(
         None, description="Font size of the text in points")
@@ -112,8 +113,22 @@ class SlideShape(BaseModel):
         None, description="Number of text segments")
     is_segmented: Optional[bool] = Field(
         None, description="Whether the text has been segmented for translation")
+    validation_status: Optional[str] = Field(None, description="Status of coordinate validation")
+    validation_details: Optional[str] = Field(None, description="Detailed validation information")
+    
+    # Alias for backward compatibility - 'text' points to 'original_text'
+    @property
+    def text(self) -> Optional[str]:
+        """Alias for original_text for backward compatibility."""
+        return self.original_text
+    
+    @text.setter
+    def text(self, value: Optional[str]) -> None:
+        """Setter for text property."""
+        self.original_text = value
 
-    @validator("shape_id", pre=True, always=True)
+    @field_validator("shape_id", mode="before")
+    @classmethod
     def set_shape_id(cls, v):
         """Set a UUID for shape_id if not provided."""
         return v or str(uuid.uuid4())
@@ -135,7 +150,8 @@ class ProcessedSlide(BaseModel):
     shapes: List[SlideShape] = Field(
         default_factory=list, description="Text shapes on the slide")
 
-    @validator("slide_id", pre=True, always=True)
+    @field_validator("slide_id", mode="before")
+    @classmethod
     def set_slide_id(cls, v):
         """Set a UUID for slide_id if not provided."""
         return v or str(uuid.uuid4())

@@ -168,38 +168,67 @@ app/
 ├── core/                  # Configuration and settings
 ├── models/                # Pydantic models
 ├── services/              # Business logic
-│   ├── pptx_processor.py  # Main processing service
-│   └── supabase_service.py
-└── main.py               # FastAPI application
+│   ├── pptx_processor.py  # Main processing orchestrator
+│   ├── svg_generator.py   # Handles SVG generation (UNO API + Batch)
+│   ├── slide_parser.py    # Extracts text and shapes from PPTX
+│   ├── supabase_service.py# Manages all Supabase interactions (DB & Storage)
+│   ├── job_status.py      # Manages local, real-time job status for polling
+│   ├── processing_manager.py # Manages the background job queue
+│   ├── worker_pool.py     # Manages the concurrent worker pool (Semaphore)
+│   ├── cache_service.py   # Handles caching of processed results
+│   ├── results_service.py # Retrieves final results (from storage or DB)
+│   └── pptx_export.py     # (Placeholder) For future export-to-PPTX feature
+└── main.py                # FastAPI application
 
-docs/                     # Documentation
-memory-bank/             # Project context and progress
-tests/                   # Test files
+docs/                      # Documentation
+memory-bank/               # Project context and progress
+tests/                     # Test files
 ```
 
 ### Key Services
 
 #### PPTX Processor (`app/services/pptx_processor.py`)
-- `process_pptx()` - Main processing orchestration
-- `_generate_svgs_for_all_slides_libreoffice()` - Batch SVG generation
-- `extract_shapes_enhanced()` - Translation-optimized text extraction
-- `process_slide()` - Individual slide processing
+The main orchestrator service. It's responsible for coordinating the entire processing workflow, checking the cache, calling the SVG generator and slide parser, and updating status via both the local and Supabase services.
+
+#### ProcessingManager & WorkerPool (`app/services/processing_manager.py`, `app/services/worker_pool.py`)
+These services manage the background job queue and concurrency. When a new job is submitted, the `ProcessingManager` adds it to a queue and the `WorkerPool` ensures it's picked up by a worker when a slot is free, preventing the system from being overloaded.
+
+#### Dual Status Services (`app/services/job_status.py` & `app/services/supabase_service.py`)
+The application uses two channels for status updates:
+- **`job_status.py`**: Provides granular, real-time updates to a local file. This is used for the client to poll for progress.
+- **`supabase_service.py`**: Updates the persistent, high-level status in the main database (e.g., "completed", "failed").
+
+#### Cache Service (`app/services/cache_service.py`)
+A file-based cache that stores the results of previous processing jobs. It generates a key based on the file content and parameters, which dramatically speeds up reprocessing of the same file.
 
 #### Supabase Service (`app/services/supabase_service.py`)
-- Storage bucket management
-- File upload and URL generation
-- Database integration
+This service isolates all interactions with Supabase, including uploading files to storage buckets and reading/writing job results and status to the database.
 
 ### Testing
+
+The project uses `pytest` for testing. The tests are located in the `tests/` directory and are designed to run without requiring external services like a running Supabase instance, as these dependencies are mocked.
+
+**Running the Integration Tests:**
+
+To run the main integration test suite, use the following command:
+
 ```bash
-# Run tests
-pytest tests/
+# Run the integration tests for the processing endpoints
+uv run pytest tests/integration/test_processing_routes.py
+```
 
-# Run with coverage
-pytest --cov=app tests/
+This will execute tests that cover:
+- Successful file uploads using the `UnderstandRatios.pptx` test file.
+- Handling of unsupported file types.
+- Validation of required request data.
 
-# Integration tests
-pytest tests/integration/
+**Running All Tests:**
+
+To run the entire test suite:
+
+```bash
+# Run all tests
+uv run pytest
 ```
 
 ## 🐳 Docker Deployment

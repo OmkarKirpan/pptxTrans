@@ -1,14 +1,13 @@
 import pytest
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 from app.core.config import get_settings, Settings
 from fastapi.testclient import TestClient
-from main import app
+from app.main import create_application
+import os
 
-
-@pytest.fixture
+@pytest.fixture(scope="session")
 def test_settings():
-    """Mock application settings for testing."""
+    """Override settings for the entire test session."""
     return Settings(
         API_ENV="test",
         TEMP_UPLOAD_DIR="./tmp/test_uploads",
@@ -18,21 +17,40 @@ def test_settings():
         SUPABASE_STORAGE_BUCKET="test-bucket",
         PROJECT_VERSION="1.0.0-test",
         LIBREOFFICE_PATH=None,  # No LibreOffice for tests
+        ENVIRONMENT="test",
     )
 
+@pytest.fixture(scope="session")
+def app(test_settings):
+    """Create a FastAPI app instance for the test session with overridden settings."""
+    def get_settings_override():
+        return test_settings
 
-@pytest.fixture
-def mock_settings(test_settings):
-    """Patch the get_settings function to return test settings."""
-    with patch("app.core.config.get_settings", return_value=test_settings):
-        yield test_settings
+    application = create_application()
+    application.dependency_overrides[get_settings] = get_settings_override
+    
+    upload_dir = test_settings.TEMP_UPLOAD_DIR
+    processing_dir = test_settings.TEMP_PROCESSING_DIR
+    
+    os.makedirs(upload_dir, exist_ok=True)
+    os.makedirs(processing_dir, exist_ok=True)
+
+    yield application
+
+    application.dependency_overrides.clear()
 
 
-@pytest.fixture
-def test_client(mock_settings):
-    """Create a FastAPI TestClient with mocked settings."""
-    with TestClient(app) as client:
-        yield client
+@pytest.fixture(scope="module")
+def test_client(app):
+    """
+    Provides a TestClient that can be used across a test module.
+    The client is configured with test settings and a mocked processing manager
+    to prevent the real one from starting during tests.
+    """
+    with patch("app.main.initialize_processing_manager"), \
+         patch("app.main.get_processing_manager", return_value=AsyncMock()):
+        with TestClient(app) as client:
+            yield client
 
 
 @pytest.fixture
@@ -40,17 +58,18 @@ def mock_supabase_client():
     """Create a mock Supabase client."""
     mock_client = MagicMock()
 
-    # Mock storage
     mock_client.storage = MagicMock()
     mock_client.storage.list_buckets = MagicMock(
         return_value=[{"name": "test-bucket"}])
-    mock_client.storage.from_ = MagicMock()
-    mock_client.storage.from_().upload = MagicMock(
-        return_value={"Key": "test-file.svg"})
-    mock_client.storage.from_().get_public_url = MagicMock(
+    
+    mock_bucket = MagicMock()
+    mock_bucket.upload = MagicMock(return_value={"Key": "test-file.svg"})
+    mock_bucket.remove = MagicMock(return_value=True)
+    mock_bucket.get_public_url = MagicMock(
         return_value="https://fake-supabase.com/storage/test-bucket/test-file.svg")
+    
+    mock_client.storage.from_ = MagicMock(return_value=mock_bucket)
 
-    # Mock database
     mock_client.table = MagicMock()
     mock_client.table().insert = MagicMock()
     mock_client.table().insert().execute = MagicMock(
@@ -64,16 +83,15 @@ def mock_supabase_client():
 
 @pytest.fixture
 def mock_supabase_service(mock_supabase_client):
-    """Patch the Supabase service functions."""
+    """
+    Patches Supabase service functions for tests that need to simulate
+    a healthy Supabase connection without making real calls.
+    """
+    async def mock_check_connection(*args, **kwargs):
+        return True
+
+    # Use new_callable to properly patch async functions that are awaited in routes
     with patch("app.services.supabase_service._create_supabase_client", return_value=mock_supabase_client), \
-            patch("app.services.supabase_service.check_supabase_connection", return_value=True), \
-            patch("app.services.supabase_service.validate_supabase_credentials", return_value=True):
-        yield
-
-
-@pytest.fixture
-def event_loop():
-    """Create an instance of the default event loop for each test."""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
-    loop.close()
+         patch("app.api.routes.health.check_supabase_connection", new_callable=lambda: mock_check_connection), \
+         patch("app.services.supabase_service.check_supabase_connection", new_callable=lambda: mock_check_connection):
+        yield 

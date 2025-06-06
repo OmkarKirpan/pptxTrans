@@ -27,6 +27,18 @@ Since storage bucket creation requires special permissions, you need to set up s
       - Public bucket: ✓ (check this)
       - Click "Create bucket"
 
+   c. **exported-files** (for future use)
+      - Click "New bucket"
+      - Name: `exported-files`
+      - Public bucket: ✓ (check this)
+      - Click "Create bucket"
+
+   d. **original-files** (for future use)
+      - Click "New bucket"
+      - Name: `original-files`
+      - Public bucket: ✓ (check this)
+      - Click "Create bucket"
+
 4. **Configure Bucket Policies (Optional for Development)**
    
    For development, public buckets should work fine. For production, you may want to add RLS policies:
@@ -51,6 +63,7 @@ CREATE POLICY "Allow public access" ON storage.objects
 After creating the buckets, your application should be able to:
 - Upload SVG files to `slide-visuals`
 - Upload result JSON files to `processing-results`
+- (In the future) Upload exported PPTX files to `exported-files`
 - Generate public URLs for uploaded files
 
 The application will automatically handle file uploads once the buckets exist. 

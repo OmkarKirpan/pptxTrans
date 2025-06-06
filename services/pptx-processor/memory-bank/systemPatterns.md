@@ -1,152 +1,109 @@
 # System Patterns
 
-## Architecture Overview
+## Architecture Overview (Updated)
 
-The PPTX Processor Service follows a modular, single-path architecture with LibreOffice-only SVG generation, now organized into focused, maintainable modules:
+The PPTX Processor Service follows a sophisticated, event-driven architecture designed for robust, concurrent processing. It leverages a worker pool, a job queue, caching, and a dual-channel status system to manage tasks efficiently. The monolithic service has been broken down into multiple, single-responsibility services.
 
 ```mermaid
 graph TD
-    A[Client] --> B(API Layer - FastAPI)
-    B --> C{Main Orchestrator - pptx_processor.py}
-    C --> D[Data Models - Pydantic]
-    C --> E{Configuration - core/config.py}
-    C --> F[SVG Generator Module - svg_generator.py]
-    C --> G[Slide Parser Module - slide_parser.py]
-    F --> H(LibreOffice UNO API + Batch Fallback)
-    G --> I(Enhanced Text Extraction + Validation)
-    C --> J(Cache + Job Management)
-    C --> K(Supabase Client - Storage)
-```
-
-### Modular Architecture (Refactored)
-
-The service has been refactored from a monolithic 600+ line file into three focused modules:
-
-#### 1. **Main Orchestrator (`pptx_processor.py`)** - 546 lines
-- **Responsibility**: High-level workflow coordination and job management
-- **Functions**: `process_pptx()`, `process_slide_simplified()`, `queue_pptx_processing()`
-- **Features**: Cache management, status tracking, error coordination
-- **Integration**: Imports and coordinates between SVG generator and slide parser modules
-
-#### 2. **SVG Generator Module (`svg_generator.py`)** - 253 lines
-- **Responsibility**: All SVG generation using LibreOffice and UNO API
-- **Functions**: 
-  - `generate_svgs()` - Main entry point with dual strategy
-  - `generate_svgs_via_uno_api()` - UNO API with retry mechanisms
-  - `generate_svgs_via_libreoffice_batch()` - Batch conversion fallback
-  - `validate_libreoffice_availability()` - System validation
-- **Features**: Async retry decorator, comprehensive error handling, timeout management
-
-#### 3. **Slide Parser Module (`slide_parser.py`)** - 423 lines
-- **Responsibility**: Shape extraction, text processing, and coordinate validation
-- **Functions**:
-  - `extract_shapes_enhanced()` - Shape and table extraction with translation optimization
-  - `validate_coordinates_with_svg()` - Complete coordinate validation pipeline
-  - `create_thumbnail_from_slide_enhanced()` - Thumbnail generation
-  - Helper functions for SVG analysis and text matching
-- **Features**: Table cell extraction, fuzzy text matching, coordinate transformation
-
-### Core Components (Modular)
-1. **API Layer (`main.py`, `app/api/routes/`)**: Handles HTTP requests, enqueues processing tasks using FastAPI `BackgroundTasks`.
-2. **Main Orchestrator (`pptx_processor.py`)**: Coordinates the processing workflow:
-   - Uses `app.core.config.settings` for configuration
-   - Delegates SVG generation to `svg_generator` module
-   - Delegates shape extraction to `slide_parser` module
-   - Manages caching, job status, and cleanup
-3. **SVG Generation Module (`svg_generator.py`)**: Handles all SVG creation:
-   - **Primary Strategy**: UNO API for individual slide processing with retry mechanisms
-   - **Fallback Strategy**: LibreOffice batch conversion for reliability
-   - **No ElementTree**: Removed complex fallback approaches
-4. **Slide Parser Module (`slide_parser.py`)**: Handles all text and shape processing:
-   - **Table Handling**: Identifies table shapes and iterates through each cell, creating a separate `SlideShape` for each cell
-   - **Coordinate Validation**: Complete SVG text matching with fuzzy logic
-   - **Enhanced Metadata**: Translation-optimized data structure
-   - **Thumbnail Generation**: Uses Pillow with enhanced slide data
-5. **Data Models (`app/models/schemas.py`)**: Pydantic models optimized for translation workflows
-6. **Storage (`app/services/supabase_service.py`)**: Handles uploading processed assets to Supabase
-
-### Modular Processing Pipeline
-
-```mermaid
-sequenceDiagram
-    participant Client
-    participant API (FastAPI)
-    participant Orchestrator (pptx_processor)
-    participant SVGGen (svg_generator)
-    participant SlideParser (slide_parser)
-    participant Storage (Supabase)
-
-    Client->>API: Upload PPTX file
-    API->>Orchestrator: Queue processing task (async)
-    Orchestrator->>SVGGen: generate_svgs() - UNO API + Fallback
-    SVGGen->>SVGGen: Try UNO API first, then LibreOffice batch
-    SVGGen-->>Orchestrator: All SVG files generated
-    loop For Each Slide
-        Orchestrator->>SlideParser: extract_shapes_enhanced()
-        SlideParser->>SlideParser: Process tables cell-by-cell
-        SlideParser->>SlideParser: validate_coordinates_with_svg()
-        SlideParser-->>Orchestrator: Enhanced metadata + validation
-        Orchestrator->>Storage: Upload SVG + metadata
+    subgraph "API Layer (main.py, routes)"
+        A[Client] --> B(FastAPI Endpoints)
     end
-    Orchestrator->>Storage: Upload final processing results
-    Orchestrator-->>API: Success with session data
-    API-->>Client: Processing status and results
+
+    subgraph "Job Submission"
+        B -- "1. Submit Job" --> C(pptx_processor.py<br/>queue_pptx_processing)
+        C -- "2. Add to Queue" --> D{ProcessingManager}
+    end
+
+    subgraph "Background Processing"
+        D -- "3. Pulls from Queue" --> E(WorkerPool<br/>Semaphore)
+        E -- "4. Assigns Worker" --> F(pptx_processor.py<br/>process_pptx)
+    end
+    
+    subgraph "Core Logic"
+        F -- "6. Check/Store Cache" --> G(CacheService<br/>File-based cache)
+        F -- "7. Generate SVGs" --> H(svg_generator.py<br/>UNO API + Batch Fallback)
+        F -- "8. Extract Shapes/Text" --> I(slide_parser.py<br/>python-pptx + Validation)
+    end
+
+    subgraph "Status & Storage"
+        F -- "9. Detailed Updates" --> J(job_status.py<br/>Local/In-memory status)
+        F -- "10. Final Assets & Status" --> K(supabase_service.py)
+        K -- "11. Uploads" --> L(Supabase Storage<br/>- slide-visuals<br/>- processing-results)
+        K -- "12. Updates DB" --> M(Supabase Database<br/>- translation_sessions)
+    end
+    
+    subgraph "Result Retrieval"
+        B -- "Poll Status" --> J
+        B -- "Get Final Results" --> N(results_service.py)
+        N -- "Fetches Results" --> K
+    end
+    
+    subgraph "Future Features (Placeholders)"
+        O(pptx_export.py)
+    end
+    
+    A -- "Uploads PPTX" --> B
+    B -- "Returns job_id" --> A
+    A -- "Polls with job_id" --> B
+    A -- "Retrieves with session_id" --> B
 ```
+
+### Core Components
+1.  **API Layer (`main.py`, `app/api/routes/`)**: Handles HTTP requests. The `/process` endpoint accepts a PPTX file and initiates processing by calling `queue_pptx_processing`, returning a `job_id` to the client.
+
+2.  **Processing Manager (`processing_manager.py`)**: A singleton service that manages an `asyncio.Queue` of processing jobs. It receives jobs from the API layer and dispatches them to the worker pool.
+
+3.  **Worker Pool (`worker_pool.py`)**: Manages concurrency using an `asyncio.Semaphore`. It ensures that no more than `MAX_CONCURRENT_JOBS` are running at once.
+
+4.  **Main Orchestrator (`pptx_processor.py`)**: Contains the core business logic.
+    *   `queue_pptx_processing`: Submits a job to the `ProcessingManager`.
+    *   `process_pptx`: The main function executed by a worker. It coordinates the entire workflow for a single PPTX file.
+
+5.  **Cache Service (`cache_service.py`)**: A file-based caching layer. Before processing, the orchestrator checks this service for a cached result. If a PPTX with the same content and parameters has been processed before, the cached result is returned, saving significant processing time.
+
+6.  **SVG Generator (`svg_generator.py`)**: Handles all SVG creation using a dual strategy for robustness:
+    *   **Primary Strategy**: Uses the LibreOffice UNO API for fine-grained, individual slide conversion.
+    *   **Fallback Strategy**: Uses a command-line batch conversion process if the UNO API fails.
+
+7.  **Slide Parser (`slide_parser.py`)**: Responsible for all shape and text extraction from the PPTX file using `python-pptx`. It also validates the extracted text coordinates against the generated SVGs for accuracy.
+
+8.  **Job Status Service (`job_status.py`)**: A local, in-memory status tracker with a file-based backup. It provides detailed, real-time progress updates (e.g., "Processing slide 5 of 20") and is used by the client to poll the status of a job.
+
+9.  **Supabase Service (`supabase_service.py`)**: Manages all interaction with Supabase.
+    *   **Storage**: Uploads final assets (SVGs, thumbnails, result JSONs) to Supabase Storage.
+    *   **Database**: Updates the high-level status of the job (e.g., "completed", "failed") in the main `translation_sessions` table and stores all the final slide and shape data.
+
+10. **Results Service (`results_service.py`)**: Handles retrieval of the final processing results. It first attempts to download a complete result JSON from Supabase storage. If that's not available, it reconstructs the result by querying all the necessary data from the database tables.
+
+11. **PPTX Export Service (`pptx_export.py`)**: A **placeholder** service for a future feature that will generate a new PPTX file from translated text. This is not part of the main processing pipeline and is not implemented.
 
 ## Key Design Patterns
 
+### Asynchronous Processing with Worker Pool
+The system is designed to handle multiple requests concurrently without blocking. When a request comes in, it's quickly added to a queue and a `job_id` is returned. The `ProcessingManager` and `WorkerPool` handle the background execution, allowing the API to remain responsive.
+
+### Dual-Channel Status Tracking
+Two separate services are used for status updates to serve different needs:
+- **Local/Real-time (`job_status.py`)**: For clients who need to poll for detailed, up-to-the-second progress information. This data is considered transient.
+- **Persistent/High-Level (`supabase_service.py`)**: For storing the final, permanent outcome of a job in the main database. This is the source of truth for the application.
+
+### Cache-Aside Strategy
+The `CacheService` implements a cache-aside pattern. The application logic first checks the cache for the result. If it's a miss, it proceeds to fetch/generate the data, and then stores the result in the cache for future requests. This is highly effective for reducing redundant processing.
+
+### Dual Strategy SVG Generation
+To maximize reliability, SVG generation uses two methods:
+- **Primary (UNO API)**: Preferred for its fine-grained control.
+- **Fallback (LibreOffice Batch)**: A more robust, "blunt-force" method used if the primary method fails, ensuring a higher success rate.
+
+### Resilient Result Retrieval
+The `ResultsService` also uses a dual strategy. It first tries a fast retrieval by downloading a single JSON file. If that fails, it has a slower, but more robust, fallback of reconstructing the entire result from database records, ensuring data can be retrieved even if parts of the finalization process failed.
+
 ### Modular Separation of Concerns
-- **SVG Generation**: Isolated in dedicated module with dual strategy implementation
-- **Text Processing**: Dedicated module for shape extraction and validation
-- **Orchestration**: Main processor focuses on workflow coordination
-- **Clear Interfaces**: Well-defined function signatures between modules
-- **Enhanced Maintainability**: Each module can be developed and tested independently
-
-### Dual Strategy SVG Generation (Enhanced)
-- **Primary (UNO API)**: Individual slide processing via UNO API with async retry decorator
-- **Fallback (LibreOffice Batch)**: Batch conversion for reliability when UNO API fails
-- **No Complex Fallbacks**: Removed ElementTree and other unreliable methods
-- **Resilient Connections**: Implemented `async_retry` mechanism for `unoserver` connections
-
-### Translation-Optimized Text Extraction (Enhanced)
-- **Cell-Level Granularity for Tables**: Treats each table cell as an independent, translatable shape
-- **Fuzzy Text Matching**: Advanced text matching with confidence scoring for coordinate validation
-- **Enhanced Coordinate Precision**: Complete coordinate validation against SVG output
-- **Translation Metadata**: Structured data optimized for translation workflows
-
-### Error Handling Strategy (Modular)
-- **Module-Specific Handling**: Each module has appropriate error handling for its domain
-- **Retry Mechanisms**: Async retry decorator for transient UNO API failures
-- **Graceful Degradation**: Fallback between SVG generation strategies
-- **Comprehensive Logging**: Structured JSON logging with contextual data
-
-### Docker-First Development
-- **Containerized Environment**: LibreOffice pre-installed and configured for headless operation
-- **Consistent Deployment**: Same environment from development to production
-- **Linux Optimization**: Leveraging Linux-based LibreOffice for better reliability
-- **Multi-stage Build**: Separation of build and runtime environments for efficiency
-- **Security First**: Non-root user, minimized dependencies, proper permissions
-- **Resource Management**: Configurable limits for CPU and memory
-
-### Production Docker Deployment
-- **Environment Isolation**: Clear separation between development and production environments
-- **Health Monitoring**: Comprehensive health checks for container monitoring
-- **Volume Management**: Persistent volumes with proper naming and permissions
-- **Service Orchestration**: Dependency management with health-based startup conditions
-- **Resource Control**: Fine-grained resource limits for optimal performance
-- **Security Enhancements**: Non-root user, minimized attack surface
+Each service has a single, well-defined responsibility. This makes the system easier to understand, maintain, and test. For example, all Supabase interactions are isolated in `supabase_service.py`, and all caching logic is in `cache_service.py`.
 
 ### Configuration-Driven Behavior
-- **LibreOffice Configuration**: Optimized command-line arguments for best SVG output
-- **Environment Variables**: All configuration via environment variables for containerization
-- **Performance Tuning**: Configurable timeouts and resource limits
-
-### Frontend Integration Optimization
-- **Slidecanvas Compatibility**: API responses designed specifically for frontend slidecanvas component
-- **Translation Focus**: All metadata structured for optimal translation experience
-- **Coordinate System**: Consistent coordinate system between LibreOffice SVG and extracted text
-- **Client-Side Handling**: Comprehensive error handling and status polling in client code
-- **Status Reporting**: Detailed progress and stage information for UI updates
+Key parameters like the number of concurrent workers (`MAX_CONCURRENT_JOBS`) and cache directory (`CACHE_DIR`) are controlled via environment variables, allowing the application's behavior to be tuned without code changes.
 
 ## Removed Patterns (Simplified Architecture)
 
@@ -221,11 +178,17 @@ app/services/
 - **Slide Parser**: 8 functions for extraction, validation, and thumbnail generation  
 - **Main Processor**: 4 main functions for orchestration and workflow management
 
-### Testing Strategy
-- **Unit Tests**: Each module can be tested independently
-- **Integration Tests**: Test interaction between modules
-- **Mock Support**: Modules can be mocked for isolated testing
-- **Coverage**: Easier to achieve comprehensive test coverage
+### Testing Framework
+- **Pytest**: The core testing framework for all unit and integration tests.
+- **Centralized Fixtures (`conftest.py`)**:
+    - `test_settings`: A session-scoped fixture providing a consistent `Settings` object for all tests, ensuring test isolation and predictable configuration.
+    - `app`: A session-scoped fixture that creates a FastAPI application instance for the entire test session, with settings overridden by `test_settings`.
+    - `test_client`: A module-scoped `TestClient` instance for making requests to the application in tests, with the `ProcessingManager` automatically mocked to prevent background jobs from running.
+- **Mocking Strategy**:
+    - `mock_supabase_client` and `mock_supabase_service`: Fixtures to provide mock implementations of the Supabase client and services, preventing real API calls during tests.
+    - `unittest.mock.patch`: Used extensively to mock specific functions and services at the test level, such as `psutil` for system health checks and `os.access` for storage checks.
+- **Test Isolation**:
+    - `tmp_path`: Pytest's built-in fixture is used in integration tests (`test_pptx_processing_logic.py`) to create temporary directories for file operations, ensuring that tests do not interfere with each other or leave artifacts on the file system.
 
 ### Deployment Architecture
 ```mermaid

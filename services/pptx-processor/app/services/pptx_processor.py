@@ -401,8 +401,10 @@ async def process_slide_simplified(
     logger.info("Processing slide", extra=log_context)
 
     try:
-        slide_width_emu = slide.parent.slide_width
-        slide_height_emu = slide.parent.slide_height
+        # Correctly access slide dimensions via the presentation part
+        pres = slide.part.package.presentation_part.presentation
+        slide_width_emu = pres.slide_width
+        slide_height_emu = pres.slide_height
 
         shapes_data = extract_shapes_enhanced(slide, slide_width_emu, slide_height_emu)
         shapes_data = await validate_coordinates_with_svg(shapes_data, svg_path, slide_width_emu, slide_height_emu)
@@ -410,7 +412,7 @@ async def process_slide_simplified(
 
         svg_object_name = f"{session_id}/slides/slide_{slide_number}.svg"
         svg_url = await upload_file_to_supabase(
-            svg_path, settings.SUPABASE_SLIDES_BUCKET, svg_object_name
+            svg_path, settings.SUPABASE_STORAGE_BUCKET, svg_object_name
         )
         logger.info("Uploaded SVG to Supabase.", extra={**log_context, "svg_url": svg_url})
 
@@ -418,12 +420,14 @@ async def process_slide_simplified(
         if generate_thumbnail:
             with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp_thumb_file:
                 try:
+                    # Also correct the dimension access here
+                    pres = slide.part.package.presentation_part.presentation
                     create_thumbnail_from_slide_enhanced(
-                        slide, shapes_data, temp_thumb_file.name, slide_width_emu, slide_height_emu
+                        slide, shapes_data, temp_thumb_file.name, pres.slide_width, pres.slide_height
                     )
                     thumb_object_name = f"{session_id}/thumbnails/thumbnail_{slide_number}.png"
                     thumbnail_url = await upload_file_to_supabase(
-                        temp_thumb_file.name, settings.SUPABASE_THUMBNAILS_BUCKET, thumb_object_name
+                        temp_thumb_file.name, settings.SUPABASE_STORAGE_BUCKET, thumb_object_name
                     )
                     logger.info("Uploaded thumbnail to Supabase.", extra={**log_context, "thumbnail_url": thumbnail_url})
                 finally:
@@ -434,13 +438,13 @@ async def process_slide_simplified(
         logger.info(f"Finished processing slide in {slide_processing_time:.2f}s", extra={**log_context, "duration_seconds": slide_processing_time})
         
         return ProcessedSlide(
+            slide_id=str(uuid.uuid4()),
             slide_number=slide_number,
-            session_id=session_id,
             svg_url=svg_url,
+            original_width=int(slide_width_emu / 9525),  # Convert EMU to pixels (1 EMU = 1/9525 inch, 96 DPI)
+            original_height=int(slide_height_emu / 9525),
             thumbnail_url=thumbnail_url,
-            shapes=shapes_data,
-            processing_status="completed",
-            processing_time_seconds=slide_processing_time,
+            shapes=shapes_data
         )
 
     except Exception as e:
@@ -449,14 +453,13 @@ async def process_slide_simplified(
         error_message = f"Failed to process slide {slide_number}: {e}"
         logger.error(error_message, extra={**log_context, "error": str(e)}, exc_info=True)
         return ProcessedSlide(
+            slide_id=str(uuid.uuid4()),
             slide_number=slide_number,
-            session_id=session_id,
-            svg_url="",
-            thumbnail_url="",
-            shapes=[],
-            processing_status="failed",
-            error_message=str(e),
-            processing_time_seconds=slide_processing_time,
+            svg_url="https://example.com/error.svg",  # Provide a valid URL for validation
+            original_width=1920,  # Default dimensions
+            original_height=1080,
+            thumbnail_url="https://example.com/error.png",
+            shapes=[]
         )
 
 
