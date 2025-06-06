@@ -1,22 +1,34 @@
 FROM python:3.12-slim AS builder
 
-WORKDIR /build
-
-# Install build dependencies
+# Install build dependencies for packages that might need compilation
 RUN apt-get update && apt-get install -y \
     build-essential \
-    curl \
+    python3-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 # Install UV package manager
 RUN pip install --no-cache-dir uv
 
+# Set UV environment variables for optimal Docker builds
+ENV UV_COMPILE_BYTECODE=1
+ENV UV_LINK_MODE=copy
+
+# Create virtual environment
+RUN uv venv /opt/venv
+
+# Use the virtual environment
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+WORKDIR /build
+
 # Copy requirements first for better layer caching
 COPY requirements.txt .
 
-# Install dependencies to a wheel directory
-RUN uv pip install --no-cache-dir -r requirements.txt --wheel-dir /wheels
+# Install dependencies using uv with cache mounting
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install -r requirements.txt
 
 FROM python:3.12-slim
 
@@ -36,9 +48,12 @@ RUN apt-get update && apt-get install -y \
     # Create a non-root user to run the application
     && useradd -m -s /bin/bash appuser
 
-# Copy wheels from builder stage
-COPY --from=builder /wheels /wheels
-RUN pip install --no-cache-dir /wheels/* && rm -rf /wheels
+# Copy the virtual environment from builder stage
+COPY --from=builder --chown=appuser:appuser /opt/venv /opt/venv
+
+# Set environment to use the virtual environment
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
 # Copy the application code
 COPY --chown=appuser:appuser . .
