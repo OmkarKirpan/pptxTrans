@@ -17,6 +17,7 @@ storage3>=0.5.4
 # Utils
 python-dotenv>=1.0.0
 aiofiles>=23.2.1
+psutil
 
 # Testing
 pytest>=7.4.2
@@ -27,6 +28,7 @@ python-json-logger
 
 # For fuzzy string matching in slide parser
 fuzzywuzzy
+python-Levenshtein
 
 # For LibreOffice UNO Bridge (installed with LibreOffice)
 # uno

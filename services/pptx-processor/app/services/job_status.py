@@ -5,13 +5,35 @@ from typing import Dict, Any
 import aiofiles
 from datetime import datetime
 
-from app.models.schemas import ProcessingStatusResponse
+from app.models.schemas import ProcessingStatusResponse, ProcessingStatus
 
 # In-memory job status store (for demo purposes)
 # In a production environment, this would be stored in Redis or a similar service
 JOB_STATUS: Dict[str, ProcessingStatusResponse] = {}
 
 logger = logging.getLogger(__name__)
+
+
+async def create_job_status(job_id: str, session_id: str, status: ProcessingStatus, current_stage: str) -> None:
+    """
+    Create a new job status entry.
+    
+    Args:
+        job_id: Unique identifier for the job
+        session_id: Session ID associated with the job
+        status: Processing status (QUEUED, PROCESSING, etc.)
+        current_stage: Description of current processing stage
+    """
+    job_status = ProcessingStatusResponse(
+        job_id=job_id,
+        session_id=session_id,
+        status=status,
+        progress=0,
+        current_stage=current_stage,
+        created_at=datetime.now()
+    )
+    
+    await update_job_status(job_id, job_status)
 
 
 async def update_job_status(job_id: str, status: ProcessingStatusResponse) -> None:

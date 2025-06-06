@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from app.core.config import Settings, get_settings
 from app.models.schemas import ExportResponse, DownloadUrlResponse, ProcessingStatus, ProcessingStatusResponse
 from app.services.supabase_service import validate_supabase_credentials, get_supabase_signed_url
-from app.services.job_status_service import create_job_status, update_job_status, get_job_status
+from app.services.job_status import create_job_status, update_job_status, get_job_status
 from app.services.pptx_export import export_pptx_task
 
 router = APIRouter()

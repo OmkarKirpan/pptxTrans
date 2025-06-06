@@ -8,7 +8,7 @@ from datetime import datetime
 from pptx import Presentation
 
 from app.models.schemas import ProcessingStatus, ProcessingStatusResponse
-from app.services.job_status_service import update_job_status
+from app.services.job_status import update_job_status
 from app.services.supabase_service import upload_file_to_supabase, download_from_storage
 
 logger = logging.getLogger(__name__)

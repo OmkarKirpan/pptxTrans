@@ -391,18 +391,107 @@ async def get_shapes_for_slide(
     slide_id: str
 ) -> List[Dict[str, Any]]:
     """
-    Get all shapes for a slide from Supabase.
-    Uses Supabase credentials from settings.
+    Retrieve all shapes for a specific slide.
     """
     try:
         supabase = _create_supabase_client()
+        response = supabase.table("slide_shapes") \
+            .select("*") \
+            .eq("slide_id", slide_id) \
+            .execute()
 
-        # Query the shapes for the slide
-        response = supabase.table("slide_shapes").select(
-            "*").eq("slide_id", slide_id).order("reading_order").execute()
-
-        return response.data
-
+        if response.data:
+            return response.data
+        else:
+            logger.warning(f"No shapes found for slide: {slide_id}")
+            return []
     except Exception as e:
-        logger.error(f"Error getting shapes from Supabase: {str(e)}")
-        raise Exception(f"Failed to get shapes from Supabase: {str(e)}")
+        logger.error(f"Error retrieving shapes for slide {slide_id}: {str(e)}")
+        raise Exception(f"Failed to retrieve shapes for slide: {str(e)}")
+
+
+async def get_supabase_signed_url(
+    bucket: str,
+    path: str,
+    expiration: Optional[Any] = None
+) -> Optional[str]:
+    """
+    Generate a signed URL for downloading a file from Supabase storage.
+    
+    Args:
+        bucket: The storage bucket name
+        path: The file path within the bucket
+        expiration: Expiration time for the signed URL (datetime object)
+    
+    Returns:
+        Signed URL string or None if file doesn't exist
+    """
+    try:
+        supabase = _create_supabase_client()
+        
+        # Calculate expiration in seconds from now if provided
+        expires_in = None
+        if expiration:
+            from datetime import datetime
+            if hasattr(expiration, 'timestamp'):
+                expires_in = int((expiration - datetime.now()).total_seconds())
+            else:
+                expires_in = 3600  # Default to 1 hour
+        else:
+            expires_in = 3600  # Default to 1 hour
+        
+        # Generate signed URL
+        response = supabase.storage.from_(bucket).create_signed_url(
+            path=path,
+            expires_in=expires_in
+        )
+        
+        if response and 'signedURL' in response:
+            return response['signedURL']
+        else:
+            logger.warning(f"Failed to generate signed URL for {bucket}/{path}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Error generating signed URL for {bucket}/{path}: {str(e)}")
+        return None
+
+
+async def download_from_storage(
+    file_path: str,
+    bucket: str,
+    destination: str
+) -> str:
+    """
+    Download a file from Supabase Storage to a local destination.
+    
+    Args:
+        file_path: Path to the file in Supabase storage
+        bucket: The storage bucket name
+        destination: Local file path where the file should be saved
+    
+    Returns:
+        Local file path of the downloaded file
+    """
+    try:
+        supabase = _create_supabase_client()
+        
+        # Download the file
+        response = supabase.storage.from_(bucket).download(file_path)
+        
+        if response:
+            # Ensure destination directory exists
+            os.makedirs(os.path.dirname(destination), exist_ok=True)
+            
+            # Write the file to destination
+            with open(destination, 'wb') as f:
+                f.write(response)
+            
+            logger.info(f"Successfully downloaded {bucket}/{file_path} to {destination}")
+            return destination
+        else:
+            raise Exception(f"Failed to download file from {bucket}/{file_path}")
+            
+    except Exception as e:
+        logger.error(f"Error downloading file from {bucket}/{file_path}: {str(e)}")
+        raise Exception(f"Failed to download file: {str(e)}")
