@@ -7,8 +7,8 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Install UV package manager
-RUN pip install --no-cache-dir uv
+# Install uv using the official image
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 # Set UV environment variables for optimal Docker builds
 ENV UV_COMPILE_BYTECODE=1
