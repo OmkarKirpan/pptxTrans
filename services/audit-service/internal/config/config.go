@@ -115,9 +115,60 @@ func Load() (*Config, error) {
 	log.Printf("SUPABASE_JWT_SECRET: %s", os.Getenv("SUPABASE_JWT_SECRET"))
 	log.Printf("CORS_ORIGIN: %s", os.Getenv("CORS_ORIGIN"))
 
-	var cfg Config
-	if err := viper.Unmarshal(&cfg); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+	// Create config with direct environment variable access as fallback
+	cfg := Config{
+		Port:       getEnvOrDefault("PORT", "4006"),
+		LogLevel:   getEnvOrDefault("LOG_LEVEL", "info"),
+		CORSOrigin: getEnvOrDefault("CORS_ORIGIN", "http://localhost:3000"),
+
+		SupabaseURL:            os.Getenv("SUPABASE_URL"),
+		SupabaseAnonKey:        os.Getenv("SUPABASE_ANON_KEY"),
+		SupabaseServiceRoleKey: os.Getenv("SUPABASE_SERVICE_ROLE_KEY"),
+		SupabaseJWTSecret:      os.Getenv("SUPABASE_JWT_SECRET"),
+
+		MaxPageSize:     getEnvOrDefaultInt("MAX_PAGE_SIZE", 100),
+		DefaultPageSize: getEnvOrDefaultInt("DEFAULT_PAGE_SIZE", 50),
+	}
+
+	// Parse duration fields
+	var err error
+	if cfg.HTTPTimeout, err = time.ParseDuration(getEnvOrDefault("HTTP_TIMEOUT", "30s")); err != nil {
+		return nil, fmt.Errorf("invalid HTTP_TIMEOUT: %w", err)
+	}
+	if cfg.HTTPIdleConnTimeout, err = time.ParseDuration(getEnvOrDefault("HTTP_IDLE_CONN_TIMEOUT", "90s")); err != nil {
+		return nil, fmt.Errorf("invalid HTTP_IDLE_CONN_TIMEOUT: %w", err)
+	}
+	if cfg.CacheJWTTTL, err = time.ParseDuration(getEnvOrDefault("CACHE_JWT_TTL", "5m")); err != nil {
+		return nil, fmt.Errorf("invalid CACHE_JWT_TTL: %w", err)
+	}
+	if cfg.CacheShareTokenTTL, err = time.ParseDuration(getEnvOrDefault("CACHE_SHARE_TOKEN_TTL", "1m")); err != nil {
+		return nil, fmt.Errorf("invalid CACHE_SHARE_TOKEN_TTL: %w", err)
+	}
+	if cfg.CacheCleanupInterval, err = time.ParseDuration(getEnvOrDefault("CACHE_CLEANUP_INTERVAL", "10m")); err != nil {
+		return nil, fmt.Errorf("invalid CACHE_CLEANUP_INTERVAL: %w", err)
+	}
+
+	// Parse int fields
+	if cfg.HTTPMaxIdleConns = getEnvOrDefaultInt("HTTP_MAX_IDLE_CONNS", 100); cfg.HTTPMaxIdleConns <= 0 {
+		return nil, fmt.Errorf("HTTP_MAX_IDLE_CONNS must be positive")
+	}
+	if cfg.HTTPMaxConnsPerHost = getEnvOrDefaultInt("HTTP_MAX_CONNS_PER_HOST", 10); cfg.HTTPMaxConnsPerHost <= 0 {
+		return nil, fmt.Errorf("HTTP_MAX_CONNS_PER_HOST must be positive")
+	}
+
+	// Try viper unmarshal as backup (this might override some values)
+	var viperCfg Config
+	if err := viper.Unmarshal(&viperCfg); err == nil {
+		// Use viper values if they're not empty
+		if viperCfg.SupabaseURL != "" {
+			cfg.SupabaseURL = viperCfg.SupabaseURL
+		}
+		if viperCfg.SupabaseServiceRoleKey != "" {
+			cfg.SupabaseServiceRoleKey = viperCfg.SupabaseServiceRoleKey
+		}
+		if viperCfg.SupabaseJWTSecret != "" {
+			cfg.SupabaseJWTSecret = viperCfg.SupabaseJWTSecret
+		}
 	}
 
 	// Validate required fields
@@ -126,6 +177,31 @@ func Load() (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+// Helper function to get environment variable with default
+func getEnvOrDefault(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
+
+// Helper function to get environment variable as int with default
+func getEnvOrDefaultInt(key string, defaultValue int) int {
+	if value := os.Getenv(key); value != "" {
+		if intValue, err := parseIntFromString(value); err == nil {
+			return intValue
+		}
+	}
+	return defaultValue
+}
+
+// Helper function to parse int from string
+func parseIntFromString(s string) (int, error) {
+	var result int
+	_, err := fmt.Sscanf(s, "%d", &result)
+	return result, err
 }
 
 // Validate ensures all required configuration is present

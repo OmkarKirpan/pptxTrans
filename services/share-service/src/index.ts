@@ -4,7 +4,7 @@ import { cors } from 'hono/cors';
 import { prettyJSON } from 'hono/pretty-json';
 import { secureHeaders } from 'hono/secure-headers';
 
-import { shareController } from './controllers/share-controller';
+import { shareController } from './controllers/shareController';
 import { errorHandler } from './middleware/error-handler';
 import { createLogger } from './utils/logger';
 

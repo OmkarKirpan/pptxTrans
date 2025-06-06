@@ -35,11 +35,9 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # Install LibreOffice and runtime dependencies
-RUN apt-get update && apt-get install -y \
-    libreoffice \
-    libreoffice-writer \
+RUN apt-get update && apt-get install --no-install-recommends -y \
+    libreoffice-common \
     libreoffice-impress \
-    libreoffice-draw \
     fonts-dejavu-core \
     fonts-liberation \
     curl \
