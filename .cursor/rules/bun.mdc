@@ -34,7 +34,7 @@ npm init → bun init
 ## Development
 - Use `bun --watch` for file watching
 - Prefer Bun's built-in test runner and bundler
-- Use `bun.lockb` lockfile instead of package-lock.json
+- Use `bun.lock` lockfile instead of package-lock.json
 
 ## Best Practices
 - Leverage Bun's speed and built-in features

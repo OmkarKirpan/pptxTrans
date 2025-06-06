@@ -216,7 +216,7 @@ services/translation-session-service/
     middleware.ts         # (Optional) JWT validation, error handling
   package.json
   tsconfig.json
-  bun.lockb
+  bun.lock
   Dockerfile            # (Planned)
 ```
 
